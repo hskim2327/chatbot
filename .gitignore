@@ -1,0 +1,32 @@
+# python
+__pycache__/
+*.pyc
+
+# env
+.env
+.venv/
+venv/
+
+# jupyter
+.ipynb_checkpoints/
+
+# vscode
+.vscode/
+
+# mac
+.DS_Store
+
+# local data
+/data/**
+!/data/
+!/data/.gitkeep
+!/data/raw/
+!/data/raw/.gitkeep
+!/data/processed/
+!/data/processed/.gitkeep
+!/data/eval/
+!/data/eval/.gitkeep
+
+# generated files
+/indexes/
+/outputs/
