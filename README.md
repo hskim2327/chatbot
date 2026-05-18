@@ -1,165 +1,203 @@
-RFP RAG System
+# RFP RAG Baseline
 
-공공기관 및 기업의 RFP(Request For Proposal) 문서를 기반으로 질의응답을 수행하는 Retrieval-Augmented Generation(RAG) 시스템 프로젝트입니다.
+공공기관 및 기업의 RFP 문서를 기반으로 질문에 답하는 RAG 시스템입니다.
 
-본 프로젝트의 목표는 대량의 입찰 및 제안 요청 문서에서 사용자가 원하는 정보를 빠르고 정확하게 검색하고, 관련 내용을 기반으로 신뢰도 있는 답변을 생성하는 것입니다.
+현재 목표는 거창한 실험 환경이 아니라, **이미 청킹된 데이터로 처음부터 끝까지 한 번 돌아가는 베이스라인**을 만드는 것입니다.
 
-프로젝트는 단순 QA 시스템 구현에 그치지 않고, Retrieval 성능 향상과 Generation 품질 개선을 위한 다양한 실험을 수행하는 것을 핵심 목표로 합니다.
+지금 단계에서는 다음을 하지 않습니다.
 
-Project Goal
+- 원본 문서 parsing
+- chunking
+- retrieval/generation 정량 평가
+- hybrid retrieval
+- HuggingFace 모델 비교
+- ChromaDB 비교
 
-본 프로젝트의 최종 목표는 다음과 같습니다.
+지금 단계에서 하는 것은 다음입니다.
 
-대규모 RFP 문서에 대한 효율적인 검색 시스템 구축
-문서 기반 질의응답(RAG) 파이프라인 구현
-Dense Retrieval / Sparse Retrieval 비교 실험
-다양한 임베딩 모델 및 검색 전략 성능 비교
-Hallucination 감소 및 응답 신뢰성 향상
-Retrieval 및 Generation 품질 평가 자동화
-실험 가능한 구조의 모듈형 RAG 시스템 설계
-Current Progress
+- `data/processed/chunks_v2.jsonl` 로드
+- 기본값으로 OpenAI embedding + FAISS 기반 dense retrieval 실행
+- 필요하면 BM25 기반 sparse retrieval로 전환
+- 검색된 chunk를 눈으로 확인
+- 검색된 chunk를 기반으로 OpenAI generator가 답변 생성
 
-현재까지 다음 작업이 완료되었습니다.
+## Data Flow
 
-Data Processing
-RFP 문서 chunk 데이터 확보
-JSONL 기반 chunk 구조 정리
-metadata 기반 데이터 구조 설계
+```text
+사용자 질문
+  -> RAGPipeline
+  -> Retriever 선택
+      -> bm25: chunks_v2.jsonl에서 바로 검색
+      -> dense: OpenAI embedding + FAISS index에서 검색
+  -> 관련 chunk top-k 반환
+  -> OpenAI Generator가 chunk만 보고 답변 생성
+  -> 답변 + 출처 출력
+```
 
-현재 chunk 데이터는 다음 정보를 포함합니다.
+## Project Structure
 
-문서 ID
-프로젝트명
-발주 기관
-섹션 정보
-금액 및 날짜 정보
-본문 텍스트
-Project Structure
-
-프로젝트는 실험 확장성과 모듈 교체 가능성을 고려하여 구조화하였습니다.
-
-src/
+```text
+chatbot/
 ├── data/
-├── embeddings/
-├── retriever/
-├── vectorstore/
-├── generator/
-├── pipeline/
-├── evaluation/
-└── utils/
-Retrieval Baseline
+│   ├── raw/                 # 원본 RFP 문서. 현재 코드에서는 직접 사용하지 않음
+│   ├── processed/           # 청킹 완료된 데이터
+│   │   └── chunks_v2.jsonl  # 현재 RAG가 실제로 읽는 핵심 파일
+│   └── eval/                # 나중에 평가할 때 사용할 데이터. 지금 baseline에서는 사용하지 않음
+│
+├── indexes/                 # FAISS index 저장 위치. Git에는 올리지 않음
+│
+├── notebooks/               # 분석/디버깅용 노트북
+│
+├── outputs/                 # 실행 결과, 로그, 실험 결과 저장 위치. Git에는 올리지 않음
+│
+├── scripts/
+│   ├── build_faiss_index.py # dense retrieval용 FAISS index 생성
+│   └── run_baseline.py      # BM25/Dense RAG 결과를 눈으로 확인하는 메인 실행 스크립트
+│
+└── src/
+    ├── data/                # chunk 데이터 로더
+    ├── embeddings/          # OpenAI embedding wrapper
+    ├── generator/           # OpenAI 답변 생성기
+    ├── pipeline/            # 전체 RAG 흐름
+    ├── retriever/           # BM25 / Dense 검색기
+    └── vectorstore/         # FAISS vector store
+```
 
-현재 BM25 기반 Sparse Retrieval baseline을 구축 중입니다.
+## Core Modules
 
-목표:
+### `src/data/loader.py`
 
-naive retrieval baseline 확보
-Dense Retrieval과 성능 비교 기준점 생성
-Retrieval evaluation 파이프라인 구축
-Generation Pipeline
+`data/processed/chunks_v2.jsonl`을 읽어서 검색기가 쓰기 쉬운 형태로 바꿉니다.
 
-OpenAI 기반 Generator 모듈을 구축 중입니다.
+입력 데이터의 `content` 필드는 내부에서 `text`로 바뀝니다.
+`project_name`, `issuer`, `budget`, `dates` 같은 값은 `metadata` 안에 들어갑니다.
 
-현재 목표:
+### `src/retriever/bm25.py`
 
-Retrieval 결과를 기반으로 context-aware generation 수행
-Hallucination 감소
-출처 기반 응답 생성
-Planned Architecture
+BM25 기반 sparse retriever입니다.
 
-최종적으로 다음 구조를 목표로 합니다.
+```text
+query -> query.split() -> BM25 점수 계산 -> top-k chunk 반환
+```
 
-User Query
-    ↓
-Query Processing
-    ↓
-Retriever
-    ├── BM25
-    ├── Dense Retrieval
-    └── Hybrid Retrieval
-    ↓
-Reranking / Metadata Filtering
-    ↓
-Context Selection
-    ↓
-LLM Generation
-    ↓
-Answer + Source
-Planned Experiments
+장점은 빠르고 index 생성이 필요 없다는 점입니다.
+단점은 한국어 문장 의미를 깊게 이해하지 못하고, 단어 겹침에 많이 의존한다는 점입니다.
 
-본 프로젝트는 다양한 Retrieval 및 Generation 전략에 대한 비교 실험을 수행할 예정입니다.
+### `src/embeddings/openai_embedder.py`
 
-Retrieval Experiments
-Sparse Retrieval
-BM25
-TF-IDF
-Dense Retrieval
-OpenAI Embedding
-HuggingFace Embedding
-BGE
-E5 계열 모델
-Hybrid Retrieval
-BM25 + Dense Retrieval 결합
-Retrieval Optimization
-Metadata Filtering
-Top-k 비교
-MMR(Maximal Marginal Relevance)
-Re-ranking
-Multi-query Retrieval
-Vector Database
+OpenAI embedding API를 감싼 모듈입니다.
 
-Dense Retrieval을 위해 Vector Database 구축을 진행할 예정입니다.
+- 여러 chunk를 batch로 embedding
+- 질문 하나를 embedding
+- 일시적인 API 실패에 대해 retry
 
-현재 고려 중인 기술:
+### `src/vectorstore/faiss_store.py`
 
-FAISS
-ChromaDB
+FAISS 기반 vector store입니다.
 
-비교 항목:
+- embedding을 FAISS index로 저장
+- query embedding과 가까운 chunk 검색
+- index를 `indexes/faiss_openai/`에 저장하고 다시 로드
 
-검색 속도
-Retrieval 성능
-메모리 효율성
-확장성
-Evaluation Strategy
+### `src/retriever/dense.py`
 
-본 프로젝트는 Retrieval과 Generation을 분리하여 평가합니다.
+OpenAI embedding과 FAISS를 합쳐서 dense retrieval을 수행합니다.
 
-Retrieval Evaluation
+BM25와 같은 형태로 사용할 수 있게 `retrieve(query, top_k)` 인터페이스를 맞췄습니다.
 
-예정 지표:
+### `src/generator/openai_generator.py`
 
-Recall@K
-MRR
-Context Precision
-Generation Evaluation
+검색된 chunk들을 context로 묶어서 OpenAI 모델에 전달합니다.
 
-예정 지표:
+프롬프트의 핵심 원칙은 다음입니다.
 
-Faithfulness
-Answer Relevancy
-Context Utilization
-Hallucination Rate
-Long-term Objectives
+```text
+아래 문맥을 기반으로만 답변해라.
+문맥에 없는 내용은 추측하지 말고 모른다고 답해라.
+```
 
-최종적으로 다음과 같은 시스템을 목표로 합니다.
+### `src/pipeline/rag_pipeline.py`
 
-다양한 Retrieval 전략을 실험 가능한 구조
-모듈 교체가 가능한 RAG 파이프라인
-실제 문서 기반 신뢰 가능한 QA 시스템
-실험 결과 기반 Retrieval 최적화
-재현 가능한 Evaluation 환경 구축
-Current Focus
+전체 흐름을 묶는 진입점입니다.
 
-현재 우선순위는 다음과 같습니다.
+```python
+pipeline = RAGPipeline(retriever_type="bm25")
+result = pipeline.run("질문")
+```
 
-Dense Retrieval 구축
-OpenAI Embedding 파이프라인 구현
-FAISS 기반 Vector Store 구축
-Dense Retriever 성능 검증
-Retrieval Evaluation 자동화
-BM25 vs Dense Retrieval 비교 실험
-Notes
-원본 데이터는 외부 공유를 금지합니다.
-.env, vector index, processed data는 GitHub에 업로드하지 않습니다.
-실험 결과 및 평가 로그는 outputs/에 저장합니다.
+또는 dense retrieval을 사용할 수 있습니다.
+
+```python
+pipeline = RAGPipeline(retriever_type="dense")
+result = pipeline.run("질문")
+```
+
+## Run
+
+먼저 `.env`에 OpenAI API key가 있어야 합니다.
+
+```text
+OPENAI_API_KEY=...
+```
+
+### 1. 기본 실행: Dense retrieval + OpenAI 답변 생성
+
+```bash
+.venv/bin/python scripts/run_baseline.py "사업 예산 규모는 얼마입니까?"
+```
+
+기본값은 다음과 같습니다.
+
+```text
+retriever = dense
+embedding = OpenAI text-embedding-3-small
+vector DB = FAISS
+answer generator = OpenAI gpt-5-mini
+```
+
+FAISS index가 없으면 첫 실행 때 `indexes/faiss_openai/`에 자동으로 생성합니다.
+이미 index가 있으면 다시 만들지 않고 로드합니다.
+
+### 2. Dense로 검색 결과만 보기
+
+```bash
+.venv/bin/python scripts/run_baseline.py "사업 예산 규모는 얼마입니까?" --no-answer
+```
+
+### 3. Dense index를 명시적으로 만들기
+
+```bash
+.venv/bin/python scripts/build_faiss_index.py
+```
+
+또는 baseline 실행 중 강제로 다시 만들 수 있습니다.
+
+```bash
+.venv/bin/python scripts/run_baseline.py "사업 예산 규모는 얼마입니까?" --build-index
+```
+
+### 4. BM25로 검색 결과만 보기
+
+```bash
+.venv/bin/python scripts/run_baseline.py "사업 예산 규모는 얼마입니까?" --retriever bm25 --no-answer
+```
+
+### 5. BM25로 검색 + 답변 생성까지 보기
+
+```bash
+.venv/bin/python scripts/run_baseline.py "사업 예산 규모는 얼마입니까?" --retriever bm25
+```
+
+## Current Baseline Goal
+
+지금은 숫자로 평가하는 단계가 아닙니다.
+
+우선은 같은 질문에 대해 다음을 눈으로 비교합니다.
+
+- BM25가 어떤 chunk를 가져오는지
+- Dense retrieval이 어떤 chunk를 가져오는지
+- 검색 결과가 질문과 관련 있어 보이는지
+- 답변이 검색된 context 안에서만 나오는지
+- 출처 chunk의 `project`, `issuer`, `doc_id`, `chunk_id`가 납득되는지
+
+이 baseline이 안정되면 다음 단계에서 evaluation과 hybrid retrieval을 다시 추가합니다.
