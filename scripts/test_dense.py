@@ -2,24 +2,29 @@ import argparse
 import os
 import sys
 
+from dotenv import load_dotenv
+
 if __package__ is None and __spec__ is None:
     ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)
 
-from src.data import load_chunks_jsonl
-from src.retriever import BM25Retriever
+from src.embeddings import OpenAIEmbedder
+from src.retriever import DenseRetriever
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a BM25 retrieval smoke test.")
+    parser = argparse.ArgumentParser(description="Run a dense retrieval smoke test against a saved FAISS index.")
     parser.add_argument("query")
-    parser.add_argument("--chunks", default="data/processed/chunks_v2.jsonl")
+    parser.add_argument("--index-dir", default="indexes/faiss_openai")
+    parser.add_argument("--model", default="text-embedding-3-small")
     parser.add_argument("--top-k", type=int, default=5)
     args = parser.parse_args()
 
-    chunks = load_chunks_jsonl(args.chunks)
-    retriever = BM25Retriever(chunks)
+    load_dotenv()
+
+    embedder = OpenAIEmbedder(model=args.model)
+    retriever = DenseRetriever.from_index(args.index_dir, embedder=embedder)
     results = retriever.retrieve(args.query, top_k=args.top_k)
 
     for rank, item in enumerate(results, 1):
