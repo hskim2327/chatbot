@@ -1,0 +1,37 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Secrets
+.env
+.env.*
+*.key
+
+# Confidential/raw project data - do not commit original RFP files
+data/
+!data/
+!data/README.md
+
+# Local vector DB / generated artifacts
+chroma_db/
+*.sqlite
+*.sqlite3
+outputs/
+artifacts/
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.gz
+
+# OS/editor
+.DS_Store
+Thumbs.db
+!.env.example
+*.jsonl
+*.parquet
+*.pkl
+*.faiss
+새 폴더/
