@@ -1,5 +1,7 @@
 from rank_bm25 import BM25Okapi
 
+from src.retriever.metadata_filter import matches_metadata
+
 
 class BM25Retriever:
     def __init__(self, chunks):
@@ -10,7 +12,7 @@ class BM25Retriever:
         ]
         self.bm25 = BM25Okapi(self.tokenized_corpus)
 
-    def retrieve(self, query, top_k=5):
+    def retrieve(self, query, top_k=5, metadata_filter=None):
         tokenized_query = query.split()
         scores = self.bm25.get_scores(tokenized_query)
 
@@ -21,9 +23,15 @@ class BM25Retriever:
         )
 
         results = []
-        for idx, score in ranked[:top_k]:
+        for corpus_rank, (idx, score) in enumerate(ranked, 1):
             item = self.chunks[idx].copy()
+            if not matches_metadata(item, metadata_filter):
+                continue
             item["score"] = float(score)
+            item["bm25_score"] = float(score)
+            item["bm25_rank"] = corpus_rank
             results.append(item)
+            if len(results) >= top_k:
+                break
 
         return results

@@ -30,3 +30,6 @@ venv/
 # generated files
 /indexes/
 /outputs/
+# evaluation outputs
+/eval/evaluation/outputs/eval/*
+!/eval/evaluation/outputs/eval/.gitkeep
