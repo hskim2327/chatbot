@@ -56,8 +56,10 @@ class DenseRetriever:
             return self._annotate_dense_results(candidates)
 
         results: List[dict[str, Any]] = []
-        search_k = max(fetch_k or top_k * 50, top_k, 100)
+        search_k = max(fetch_k or top_k * 10, top_k)
         max_k = self._count_vectors() or search_k
+        if self.vector_store.__class__.__name__ == "ChromaVectorStore":
+            max_k = min(max_k, max(search_k, 25))
 
         while search_k <= max_k:
             candidates = self.vector_store.search(query_embedding, top_k=search_k)

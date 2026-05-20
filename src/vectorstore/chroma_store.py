@@ -24,7 +24,10 @@ class ChromaVectorStore:
 
     def build(self, embeddings: Iterable[Iterable[float]], chunks: List[dict[str, Any]]) -> None:
         self.chunks = list(chunks)
-        ids = [str(chunk["chunk_id"]) for chunk in self.chunks]
+        ids = [
+            f"{chunk.get('doc_id') or 'doc'}:{chunk.get('chunk_id') or idx}:{idx}"
+            for idx, chunk in enumerate(self.chunks)
+        ]
         documents = [chunk.get("text", "") for chunk in self.chunks]
         metadatas = [{"_chunk_json": json.dumps(chunk, ensure_ascii=False)} for chunk in self.chunks]
         vectors = [list(vector) for vector in embeddings]

@@ -26,7 +26,7 @@ class MultiQueryRetriever:
                 metadata_filter=metadata_filter,
             )
             for rank, result in enumerate(results, 1):
-                key = str(result.get("chunk_id") or f"{result.get('doc_id')}:{rank}:{query_idx}")
+                key = _result_key(result, fallback=f"{rank}:{query_idx}")
                 if key not in combined:
                     combined[key] = result.copy()
                     combined[key]["score"] = 0.0
@@ -37,3 +37,14 @@ class MultiQueryRetriever:
 
         ranked = sorted(combined.values(), key=lambda item: item["score"], reverse=True)
         return ranked[:top_k]
+
+
+def _result_key(result: dict[str, Any], fallback: str) -> str:
+    metadata = result.get("metadata") or {}
+    doc_id = result.get("doc_id") or metadata.get("doc_id") or metadata.get("source_file")
+    chunk_id = result.get("chunk_id") or metadata.get("chunk_id")
+    if doc_id is not None and chunk_id is not None:
+        return f"{doc_id}:{chunk_id}"
+    if chunk_id is not None:
+        return f"chunk:{chunk_id}"
+    return f"{doc_id or 'unknown'}:{fallback}"

@@ -36,7 +36,7 @@ class HybridRetriever:
             query,
             top_k=candidate_k,
             metadata_filter=metadata_filter,
-            fetch_k=max(candidate_k * 10, 100),
+            fetch_k=candidate_k,
         )
 
         combined: dict[str, dict[str, Any]] = {}
@@ -58,9 +58,20 @@ class HybridRetriever:
         weight: float,
     ) -> None:
         for rank, result in enumerate(results, 1):
-            key = str(result.get("chunk_id") or f"{result.get('doc_id')}:{rank}:{source}")
+            key = _result_key(result, fallback=f"{rank}:{source}")
             item = combined.setdefault(key, result.copy())
             item.setdefault("score", 0.0)
             item["score"] += weight / (self.rrf_k + rank)
             item[f"{source}_rank"] = rank
             item[f"{source}_score"] = result.get("score")
+
+
+def _result_key(result: dict[str, Any], fallback: str) -> str:
+    metadata = result.get("metadata") or {}
+    doc_id = result.get("doc_id") or metadata.get("doc_id") or metadata.get("source_file")
+    chunk_id = result.get("chunk_id") or metadata.get("chunk_id")
+    if doc_id is not None and chunk_id is not None:
+        return f"{doc_id}:{chunk_id}"
+    if chunk_id is not None:
+        return f"chunk:{chunk_id}"
+    return f"{doc_id or 'unknown'}:{fallback}"
