@@ -136,9 +136,15 @@ def apply_chunk_index_suffix(index_dir: str, chunks: str) -> str:
     chunk_path = Path(chunks)
     if chunk_path.name == "chunks_v2.jsonl":
         return index_dir
-    suffix = re.sub(r"[^a-zA-Z0-9]+", "_", chunk_path.stem).strip("_").lower()
+
+    suffix_parts = []
+    if "shared_file" in chunk_path.parts and chunk_path.parent.name:
+        suffix_parts.append(chunk_path.parent.name)
+    suffix_parts.append(chunk_path.stem)
+    suffix = re.sub(r"[^a-zA-Z0-9]+", "_", "_".join(suffix_parts)).strip("_").lower()
     if not suffix:
         return index_dir
+
     path = Path(index_dir)
     if path.name.endswith(f"_{suffix}"):
         return str(path)
