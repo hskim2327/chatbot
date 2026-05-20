@@ -1,0 +1,55 @@
+{
+  "output_dir": "C:\\Users\\yoosy\\Desktop\\codeit\\project_2nd\\outputs\\parsing_p4_hwpx_690",
+  "version": "v2",
+  "document_count": 690,
+  "parse_success_docs": 690,
+  "parse_failed_docs": 0,
+  "source_format_counts": {
+    "hwpx": 664,
+    "pdf": 25,
+    "hwp_fallback": 1
+  },
+  "total_table_count": 84172,
+  "total_image_count": 3714,
+  "chunk_count": 124740,
+  "source_store_count": 96164,
+  "duplicate_doc_id_count": 0,
+  "duplicate_chunk_id_count": 0,
+  "duplicate_source_store_id_count": 0,
+  "missing_source_store_ref": 0,
+  "missing_doc_key_count": 0,
+  "embed_enabled_count": 124472,
+  "chunk_type_counts": {
+    "toc": 265,
+    "text": 26506,
+    "fact_candidates": 691,
+    "table": 97278
+  },
+  "avg_content_len": 502.41,
+  "p50_content_len": 382,
+  "p95_content_len": 990,
+  "max_content_len": 1000,
+  "chunks_jsonl_file_size_mib": 251.44,
+  "source_store_file_size_mib": 390.31,
+  "created_at": "2026-05-19 19:40:47",
+  "fact_status_counts": {
+    "extracted": 688,
+    "needs_review": 3
+  },
+  "fact_confidence_counts": {
+    "high": 605,
+    "medium": 83,
+    "low": 3
+  },
+  "low_confidence_fact_embedded_count": 0,
+  "row_type_counts": {
+    "group_title": 134572,
+    "blank": 28000,
+    "body": 279979,
+    "header_candidate": 139912,
+    "note": 1771
+  },
+  "merged_cell_count": 505356,
+  "status": "PASS",
+  "fail_reasons": []
+}
