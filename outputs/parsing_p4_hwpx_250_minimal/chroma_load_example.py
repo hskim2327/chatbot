@@ -1,4 +1,4 @@
-"""Chroma load example for P4 690 corpus.
+"""Chroma load example for P4 250 minimal corpus.
 
 Default mapping:
 - ids       <- chunk_id
@@ -76,15 +76,31 @@ def batched(items, batch_size: int):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--chunks", required=True, help="Path to chunks_v2_690.jsonl or chunks_v1_690.jsonl")
+    # 팀원별로 다르게 설정해야 하는 값입니다.
+    # 본인 Google Drive, GCP VM, 로컬 PC에 있는 chunks_v2_250.jsonl 경로로 바꿔주세요.
+    parser.add_argument("--chunks", required=True, help="Path to chunks_v2_250.jsonl")
     parser.add_argument(
         "--chroma-path",
         required=True,
         help="Local Chroma DB path. Prefer /content/... on Colab, not Google Drive.",
     )
-    parser.add_argument("--collection", default="rfp_p4_690_v2_koe5")
+
+    # 팀원별로 다르게 설정할 수 있는 값입니다.
+    # 같은 corpus라도 임베딩 모델이나 검색 조건이 다르면 collection 이름을 다르게 두는 것이 안전합니다.
+    parser.add_argument("--collection", default="rfp_p4_250_v2_koe5")
+
+    # 팀원별로 다르게 설정할 수 있는 값입니다.
+    # 기본값은 KoE5입니다. BGE-M3 등 다른 모델을 쓰면 반드시 collection 이름도 같이 바꿔주세요.
     parser.add_argument("--model", default="nlpai-lab/KoE5")
+
+    # 실행 환경에 맞게 바꿔주세요.
+    # Colab/GCP L4 GPU: cuda
+    # 로컬 CPU만 사용: cpu
+    # Mac M-series: mps 가능 여부 확인 후 사용
     parser.add_argument("--device", default="cuda")
+
+    # GPU 메모리나 런타임 상황에 맞게 조절하세요.
+    # OOM이 나면 128 또는 64로 줄이고, 여유가 있으면 256~512를 사용할 수 있습니다.
     parser.add_argument("--batch-size", type=int, default=256)
     args = parser.parse_args()
 
@@ -122,6 +138,11 @@ def main():
             normalize_embeddings=True,
             show_progress_bar=False,
         ).tolist()
+        # 선생님이 설명해주신 ChromaDB 매핑이 적용되는 부분입니다.
+        # ids       <- chunk_id
+        # documents <- content
+        # metadatas <- metadata
+        # embeddings는 KoE5로 직접 계산한 벡터입니다.
         collection.add(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
         total += len(batch)
 
