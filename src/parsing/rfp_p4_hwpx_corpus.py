@@ -20,10 +20,12 @@ CHUNK_MAX_CHARS = rfp.CHUNK_MAX_CHARS
 CHUNK_OVERLAP = rfp.CHUNK_OVERLAP
 P4_125_LIMIT = 125
 P4_125_OUTPUT_NAME = "parsing_p4_hwpx_125"
+P4_125_0521_OUTPUT_NAME = "parsing_p4_hwpx_125_0521"
 P4_125_TARGET_DOCS = 125
-P4_125_FILLER_DOCS = 85  # current deduplicated eval scope: 40 eval docs + 85 fillers
+P4_125_EVAL_DOCS = 40
+P4_125_FILLER_DOCS = 85
 P4_125_HARD_DISTRACTOR_TARGET = 12
-PARSER_VERSION = "p4_hwpx_precision_v2026_05_20"
+PARSER_VERSION = "p4_hwpx_precision_v2026_05_21"
 
 FACT_TYPE_ALIASES = {
     "document_summary": "문서요약/사업개요/공고요약",
@@ -53,6 +55,7 @@ BUSINESS_TYPE_BUCKETS = [
 ]
 
 G2B_MASTER_FILENAME = "g2b_master_cleaned.csv"
+MANUAL_BUDGET_OVERRIDE_PATH = Path("config/manual_overrides/budget_policy_overrides.csv")
 G2B_MATCH_THRESHOLD = 72
 G2B_AMBIGUOUS_MARGIN = 6
 G2B_KIND_PRIORITY = {
@@ -94,10 +97,42 @@ P4_SOURCE_AUDIT_METADATA_KEYS = [
     "final_budget",
     "final_budget_krw",
     "final_budget_status",
+    "budget_missing_reason",
+    "budget_policy_note",
+    "budget_value_role",
+    "notice_base_amount",
+    "notice_base_amount_krw",
+    "notice_base_amount_status",
+    "notice_base_amount_source",
+    "notice_base_amount_evidence",
+    "manual_budget_override_applied",
+    "manual_budget_override_eval_ids",
     "final_project_duration",
     "final_bid_deadline",
     "bid_deadline_status",
+    "source_stem_normalized",
+    "project_name_stripped",
+    "project_family_key",
+    "notice_prefix_flags",
+    "is_reannouncement",
+    "aliases",
     *G2B_METADATA_KEYS,
+]
+P4_FACT_METADATA_KEYS = [
+    "final_budget",
+    "final_budget_krw",
+    "final_budget_status",
+    "budget_missing_reason",
+    "budget_policy_note",
+    "budget_value_role",
+    "notice_base_amount",
+    "notice_base_amount_krw",
+    "notice_base_amount_status",
+    "notice_base_amount_source",
+    "project_family_key",
+    "notice_prefix_flags",
+    "is_reannouncement",
+    "aliases",
 ]
 
 
@@ -124,6 +159,21 @@ def as_scalar(value) -> str:
     if isinstance(value, dict):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
     return str(value)
+
+
+def file_sha1(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    hasher = hashlib.sha1()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def jsonl_line_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with path.open("r", encoding="utf-8") as f:
+        return sum(1 for line in f if line.strip())
 
 
 def section_to_text(section_path) -> str:
@@ -450,30 +500,77 @@ def load_p3_sample_rows(project_root: Path, limit: int = 250) -> pd.DataFrame:
 
 def strip_project_prefixes(text: str) -> str:
     text = rfp.normalize_doc_name(text)
-    text = re.sub(r"^\s*[\[\(【]?\s*(긴급|재공고|지문|국제|협상|전자입찰|수의계약)\s*[\]\)】]?\s*", "", text)
+    text = re.sub(r"^\s*[\[\(【]?\s*(긴급|재공고|정정공고|변경공고|취소공고|지문|국제|협상|전자입찰|수의계약)\s*[\]\)】]?\s*", "", text)
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"^[\-_]+", "", text)
     return text.strip()
 
 
+def notice_prefix_flags(text: str) -> list[str]:
+    normalized = rfp.normalize_doc_name(text)
+    flags = []
+    rules = [
+        ("reannouncement", ["재공고", "재입찰"]),
+        ("urgent", ["긴급"]),
+        ("fingerprint", ["지문"]),
+        ("international", ["국제"]),
+        ("correction", ["정정공고", "변경공고"]),
+        ("cancelled", ["취소공고"]),
+    ]
+    for label, keywords in rules:
+        if any(keyword in normalized for keyword in keywords):
+            flags.append(label)
+    return flags
+
+
+def compact_alias_text(text: str) -> str:
+    return re.sub(r"[\s\[\]\(\)【】_\-·,./]+", "", rfp.normalize_doc_name(text))
+
+
+def project_family_key(source_file: str, project_name: str = "") -> str:
+    issuer, inferred_project = rfp.infer_doc_title_fields(source_file)
+    stripped_project = strip_project_prefixes(project_name or inferred_project)
+    compact_project = compact_alias_text(stripped_project)
+    compact_issuer = compact_alias_text(issuer)
+    return "|".join(part for part in [compact_issuer, compact_project] if part)
+
+
 def project_aliases(source_file: str, project_name: str = "") -> list[str]:
     issuer, inferred_project = rfp.infer_doc_title_fields(source_file)
+    stripped_project = strip_project_prefixes(project_name or inferred_project)
     candidates = [
         source_file,
         rfp.normalize_doc_name(source_file),
         project_name,
         inferred_project,
-        strip_project_prefixes(project_name or inferred_project),
+        stripped_project,
+        f"{issuer} {stripped_project}" if issuer and stripped_project else "",
+        f"{issuer}_{stripped_project}" if issuer and stripped_project else "",
     ]
     aliases = []
     for value in candidates:
         value = normalize_space(value)
         if value and value not in aliases:
             aliases.append(value)
-    compact = re.sub(r"[\s\[\]\(\)【】_\-]+", "", aliases[0]) if aliases else ""
-    if compact and compact not in aliases:
-        aliases.append(compact)
-    return aliases[:6]
+    for value in list(aliases):
+        compact = compact_alias_text(value)
+        if compact and compact not in aliases:
+            aliases.append(compact)
+    return aliases[:10]
+
+
+def doc_identity_metadata(source_file: str, project_name: str = "") -> dict:
+    issuer, inferred_project = rfp.infer_doc_title_fields(source_file)
+    stripped_project = strip_project_prefixes(project_name or inferred_project)
+    flags = notice_prefix_flags(source_file)
+    return {
+        "source_stem_normalized": rfp.normalize_doc_name(source_file),
+        "project_name_stripped": stripped_project,
+        "project_family_key": project_family_key(source_file, project_name),
+        "notice_prefix_flags": " | ".join(flags),
+        "is_reannouncement": bool("reannouncement" in flags),
+        "aliases": " | ".join(project_aliases(source_file, project_name)),
+    }
 
 
 def normalize_date_policy_bid_deadline_only(date_summary: dict) -> dict:
@@ -581,6 +678,50 @@ def load_g2b_records(project_root: Path) -> list[dict]:
     if missing:
         raise ValueError(f"{G2B_MASTER_FILENAME} 필수 컬럼 누락: {missing}")
     return [normalize_g2b_record(row.to_dict()) for _, row in df.iterrows()]
+
+
+def load_budget_policy_overrides(project_root: Path) -> dict[str, dict]:
+    path = project_root / MANUAL_BUDGET_OVERRIDE_PATH
+    if not path.exists():
+        return {}
+    df = pd.read_csv(path).fillna("")
+    overrides = {}
+    for _, row in df.iterrows():
+        record = row.to_dict()
+        norm_name = rfp.normalize_doc_name(record.get("norm_name") or record.get("doc_key") or record.get("source_file") or "")
+        if norm_name:
+            overrides[norm_name] = record
+    return overrides
+
+
+def apply_budget_policy_override(doc_meta: dict, budget_summary: dict, overrides: dict[str, dict]) -> dict:
+    norm_name = rfp.normalize_doc_name(doc_meta.get("norm_name") or doc_meta.get("doc_key") or doc_meta.get("source_file") or "")
+    override = overrides.get(norm_name)
+    if not override:
+        return budget_summary
+    result = dict(budget_summary)
+    override_type = normalize_space(override.get("override_type"))
+    target_field = normalize_space(override.get("target_field"))
+    amount_text = normalize_space(override.get("amount_text"))
+    amount_krw = normalize_space(override.get("amount_krw"))
+    evidence = normalize_space(override.get("evidence"))
+    note = normalize_space(override.get("note"))
+    if override_type == "notice_base_amount" or target_field == "notice_base_amount":
+        result.update({
+            "notice_base_amount": amount_text,
+            "notice_base_amount_krw": amount_krw,
+            "notice_base_amount_status": normalize_space(override.get("amount_semantics")) or "symbolic_placeholder",
+            "notice_base_amount_source": "manual_override",
+            "notice_base_amount_evidence": evidence,
+            "budget_missing_reason": result.get("budget_missing_reason") or "not_disclosed_or_not_specified",
+            "budget_policy_note": note or "기초금액 1원은 실제 사업예산으로 보지 않고 별도 상징 금액으로 분리",
+            "budget_value_role": "symbolic_notice_base_amount",
+            "manual_budget_override_applied": True,
+            "manual_budget_override_eval_ids": normalize_space(override.get("applies_to_eval_ids")),
+        })
+        if result.get("final_budget_krw") in {"0", "1"} or result.get("final_budget") in {"0원", "1원"}:
+            result.update({"final_budget": "", "final_budget_krw": "", "final_budget_status": "missing"})
+    return result
 
 
 def g2b_score_match(doc_meta: dict, record: dict) -> tuple[int, list[str]]:
@@ -811,6 +952,7 @@ def g2b_common_metadata(doc_meta: dict) -> dict:
 def p4_block_common_metadata(doc_meta: dict) -> dict:
     metadata = rfp.block_common_metadata(doc_meta)
     metadata.update(g2b_common_metadata(doc_meta))
+    metadata.update({key: as_scalar(value) for key, value in doc_identity_metadata(doc_meta.get("source_file", ""), doc_meta.get("project_name", "")).items()})
     return metadata
 
 
@@ -992,6 +1134,12 @@ def build_eval_covered_125_sample_rows(project_root: Path, output_dir: Path | No
     metadata_lookup = rfp.build_metadata_lookup(metadata_df)
     if eval_docs_df.empty:
         raise FileNotFoundError("eval ground_truth_docs를 찾지 못했습니다: data/eval/*.csv")
+    if len(eval_docs_df) != P4_125_EVAL_DOCS:
+        raise RuntimeError(
+            f"eval ground_truth_docs unique physical doc 수가 계획과 다릅니다: "
+            f"expected={P4_125_EVAL_DOCS}, actual={len(eval_docs_df)}. "
+            "현재 P4 125 기준은 data/eval batch 01~25, 500문항에서 정규화 중복 제거한 40개 eval 문서입니다."
+        )
     if original_inventory_df.empty:
         raise FileNotFoundError("원본 RFP 파일을 찾지 못했습니다: data/original_data_list")
 
@@ -1056,6 +1204,12 @@ def build_eval_covered_125_sample_rows(project_root: Path, output_dir: Path | No
         " | ".join(project_aliases(row.source_file, getattr(row, "project_name", "")))
         for row in pilot.itertuples(index=False)
     ]
+    identity_rows = [
+        doc_identity_metadata(row.source_file, getattr(row, "project_name", ""))
+        for row in pilot.itertuples(index=False)
+    ]
+    for key in ["source_stem_normalized", "project_name_stripped", "project_family_key", "notice_prefix_flags", "is_reannouncement", "aliases"]:
+        pilot[key] = [identity.get(key, "") for identity in identity_rows]
 
     eval_included = int(pilot["is_eval_ground_truth"].astype(bool).sum())
     hard_count = int(pilot["hard_distractor"].astype(bool).sum())
@@ -1065,9 +1219,10 @@ def build_eval_covered_125_sample_rows(project_root: Path, output_dir: Path | No
         "eval_physical_source_docs_included": eval_included,
         "additional_sampled_docs": int((~pilot["is_eval_ground_truth"].astype(bool)).sum()),
         "missing_eval_gt_docs": [],
+        "planned_eval_physical_source_docs": P4_125_EVAL_DOCS,
+        "planned_additional_sampled_docs": P4_125_FILLER_DOCS,
         "actual_eval_unique_gt_docs": int(len(eval_docs_df)),
         "expected_eval_physical_source_docs": int(len(eval_docs_df)),
-        "planned_additional_sampled_docs": int(filler_needed),
         "actual_additional_sampled_docs": int(filler_needed),
         "eval_count_matches_plan": bool(eval_included == len(eval_docs_df)),
         "filler_criteria": [
@@ -1131,6 +1286,7 @@ def prepare_doc_meta(doc_row: dict, parse_path: Path, source_format: str) -> dic
     doc_meta["norm_name"] = rfp.normalize_doc_name(doc_meta.get("source_file", ""))
     doc_meta["source_format"] = source_format
     doc_meta["parse_path"] = str(parse_path)
+    doc_meta.update(doc_identity_metadata(doc_meta.get("source_file", ""), doc_meta.get("project_name", "")))
     return doc_meta
 
 
@@ -1212,6 +1368,10 @@ def blocks_to_retrieval_records(blocks: list[dict]) -> tuple[list[dict], list[di
                     metadata[key] = value
             if chunk_type == "fact_candidates":
                 metadata.update({"fact_type": block.get("fact_type", ""), "fact_status": fact_status, "fact_confidence": fact_confidence})
+                for key in P4_FACT_METADATA_KEYS:
+                    value = as_scalar(block.get(key, ""))
+                    if value:
+                        metadata[key] = value
             if chunk_type == "table":
                 metadata.update({
                     "table_role": block.get("table_role", ""),
@@ -1333,6 +1493,8 @@ def make_fact_block(
             "fact_type": fact_type,
             "aliases": alias,
             "parts": parts[:12],
+            "document_aliases": doc_meta.get("aliases", ""),
+            "project_family_key": doc_meta.get("project_family_key", ""),
         },
         "exact_terms": rfp.extract_exact_terms(text, doc_meta),
         "dates": rfp.extract_dates(text),
@@ -1361,6 +1523,9 @@ def build_compact_fact_blocks(doc_meta: dict, clean_text: str, summaries: dict) 
         f"원본문서: {doc_meta.get('source_file', '')}",
         f"정규화 문서명: {doc_meta.get('norm_name', '')}",
         f"사업명: {doc_meta.get('project_name', '')}",
+        f"접두어 제거 사업명: {doc_meta.get('project_name_stripped', '')}",
+        f"문서 family key: {doc_meta.get('project_family_key', '')}",
+        f"공고 접두어 flag: {doc_meta.get('notice_prefix_flags', '') or '없음'}",
         "사업명 alias: " + " / ".join(aliases),
         f"발주기관: {doc_meta.get('issuer', '')}",
     ]
@@ -1368,6 +1533,14 @@ def build_compact_fact_blocks(doc_meta: dict, clean_text: str, summaries: dict) 
         summary_parts.append("사업유형: " + ", ".join(business_types))
     if budget.get("final_budget"):
         summary_parts.append(f"사업금액: {budget.get('final_budget')}")
+        summary_parts.append(f"예산 역할: {budget.get('budget_value_role') or 'actual_project_budget'}")
+    elif budget.get("notice_base_amount"):
+        summary_parts.append(f"공고문 기초금액: {budget.get('notice_base_amount')}")
+        summary_parts.append("실제 사업예산: 미기재 또는 비공개")
+        summary_parts.append(f"예산 역할: {budget.get('budget_value_role') or 'notice_base_amount'}")
+    elif budget.get("budget_missing_reason"):
+        summary_parts.append("사업금액: 미기재 또는 비공개")
+        summary_parts.append(f"예산 역할: {budget.get('budget_value_role') or 'missing_budget'}")
     if period.get("final_project_duration"):
         summary_parts.append(f"사업기간: {period.get('final_project_duration')}")
     if dates.get("final_bid_deadline"):
@@ -1387,9 +1560,44 @@ def build_compact_fact_blocks(doc_meta: dict, clean_text: str, summaries: dict) 
             doc_meta,
             seq,
             "budget",
-            [f"사업금액: {budget.get('final_budget')}", f"KRW: {budget.get('final_budget_krw', '')}"],
+            [
+                f"사업금액: {budget.get('final_budget')}",
+                f"KRW: {budget.get('final_budget_krw', '')}",
+                f"예산 역할: {budget.get('budget_value_role') or 'actual_project_budget'}",
+            ],
             [budget.get("final_budget_evidence", "")],
             confidence="high",
+        )
+        if block:
+            blocks.append(block)
+            seq += 1
+    elif budget.get("notice_base_amount"):
+        block = make_fact_block(
+            doc_meta,
+            seq,
+            "budget",
+            [
+                f"공고문 기초금액: {budget.get('notice_base_amount')}",
+                "실제 사업예산: 미기재 또는 비공개",
+                "주의: 기초금액/예정가격/추정가격 단독 문맥은 실제 사업금액이 아님",
+                f"예산 역할: {budget.get('budget_value_role') or 'notice_base_amount'}",
+            ],
+            [budget.get("notice_base_amount_evidence", "") or budget.get("final_budget_evidence", "")],
+            confidence="high" if budget.get("notice_base_amount_source") == "manual_override" else "medium",
+            status="symbolic_placeholder",
+        )
+        if block:
+            blocks.append(block)
+            seq += 1
+    elif budget.get("budget_missing_reason"):
+        block = make_fact_block(
+            doc_meta,
+            seq,
+            "budget",
+            ["사업금액/사업비/예산: 미기재 | 비공개 | 문서상 확정 예산 없음"],
+            [budget.get("final_budget_evidence", "")],
+            confidence="medium",
+            status="missing_budget",
         )
         if block:
             blocks.append(block)
@@ -1503,6 +1711,24 @@ def table_blank_ratio(table: dict) -> float:
     return blanks / max(1, len(cells))
 
 
+def is_layout_or_toc_table(table: dict, text_for_embedding: str) -> bool:
+    text = normalize_space(text_for_embedding)
+    section = section_to_text(table.get("section_path"))
+    joined = f"{section} {text}"
+    compact = re.sub(r"\s+", "", joined)
+    if "목차" in compact or "목 차" in joined or "차례" in compact:
+        return True
+    lines = [normalize_space(line) for line in str(text_for_embedding or "").splitlines() if normalize_space(line)]
+    if len(lines) >= 4:
+        page_like = sum(1 for line in lines if re.search(r"(\.{2,}|…+)\s*\d{1,3}$", line) or re.search(r"\s\d{1,3}$", line))
+        if page_like / max(1, len(lines)) >= 0.5:
+            return True
+    cover_terms = ["제안요청서", "입찰공고문", "과업지시서", "용역입찰공고", "공고서"]
+    if len(text) < 260 and any(term in joined for term in cover_terms) and not any(term in joined for term in HIGH_SIGNAL_TABLE_KEYWORDS):
+        return True
+    return False
+
+
 def classify_table_for_embedding(table: dict, text_for_embedding: str) -> tuple[str, int, bool, str]:
     text = normalize_space(text_for_embedding)
     section = section_to_text(table.get("section_path"))
@@ -1515,6 +1741,8 @@ def classify_table_for_embedding(table: dict, text_for_embedding: str) -> tuple[
     col_count = int(shape.get("col_count") or 0)
     blank_ratio = table_blank_ratio(table)
 
+    if is_layout_or_toc_table(table, text_for_embedding):
+        return "layout_or_toc", signal_score, False, "toc_or_cover_layout"
     if signal_score >= 1:
         return "retrieval_signal", signal_score, True, "high_signal_keywords"
     if low_signal_score >= 1 and signal_score == 0:
@@ -1585,6 +1813,7 @@ def build_doc_artifacts(
     project_root: Path,
     hwpx_lookup: dict[str, Path],
     g2b_records: list[dict] | None = None,
+    budget_overrides: dict[str, dict] | None = None,
 ) -> dict:
     parse_path, source_format = choose_parse_source(doc_row, project_root, hwpx_lookup)
     doc_meta = prepare_doc_meta(doc_row, parse_path, source_format)
@@ -1611,9 +1840,25 @@ def build_doc_artifacts(
         "error": extracted.get("error", ""),
         "project_name": doc_meta.get("project_name", ""),
         "issuer": doc_meta.get("issuer", ""),
+        "source_stem_normalized": doc_meta.get("source_stem_normalized", ""),
+        "project_name_stripped": doc_meta.get("project_name_stripped", ""),
+        "project_family_key": doc_meta.get("project_family_key", ""),
+        "notice_prefix_flags": doc_meta.get("notice_prefix_flags", ""),
+        "is_reannouncement": bool(doc_meta.get("is_reannouncement", False)),
+        "aliases": doc_meta.get("aliases", ""),
         "final_budget": "",
         "final_budget_krw": "",
         "final_budget_status": "missing",
+        "budget_missing_reason": "",
+        "budget_policy_note": "",
+        "budget_value_role": "",
+        "notice_base_amount": "",
+        "notice_base_amount_krw": "",
+        "notice_base_amount_status": "",
+        "notice_base_amount_source": "",
+        "notice_base_amount_evidence": "",
+        "manual_budget_override_applied": False,
+        "manual_budget_override_eval_ids": "",
         "final_project_duration": "",
         "final_notice_id": "",
         "notice_id_status": "missing",
@@ -1648,7 +1893,8 @@ def build_doc_artifacts(
         "notice_id_evidence": notice_summary.get("notice_id_evidence", ""),
     })
     budget_candidates = rfp.extract_budget_candidates(clean_text, doc_meta)
-    budget_summary = rfp.select_final_budget(budget_candidates)
+    budget_summary = rfp.select_final_budget(budget_candidates, clean_text)
+    budget_summary = apply_budget_policy_override(doc_meta, budget_summary, budget_overrides or {})
     date_candidates = rfp.extract_date_candidates(clean_text, doc_meta)
     date_summary = normalize_date_policy_bid_deadline_only(rfp.select_final_dates(date_candidates))
     period_candidates = rfp.extract_period_candidates(clean_text, doc_meta)
@@ -1700,6 +1946,16 @@ def build_doc_artifacts(
         "final_budget": budget_summary.get("final_budget", ""),
         "final_budget_krw": budget_summary.get("final_budget_krw", ""),
         "final_budget_status": budget_summary.get("final_budget_status", ""),
+        "budget_missing_reason": budget_summary.get("budget_missing_reason", ""),
+        "budget_policy_note": budget_summary.get("budget_policy_note", ""),
+        "budget_value_role": budget_summary.get("budget_value_role", ""),
+        "notice_base_amount": budget_summary.get("notice_base_amount", ""),
+        "notice_base_amount_krw": budget_summary.get("notice_base_amount_krw", ""),
+        "notice_base_amount_status": budget_summary.get("notice_base_amount_status", ""),
+        "notice_base_amount_source": budget_summary.get("notice_base_amount_source", ""),
+        "notice_base_amount_evidence": budget_summary.get("notice_base_amount_evidence", ""),
+        "manual_budget_override_applied": bool(budget_summary.get("manual_budget_override_applied", False)),
+        "manual_budget_override_eval_ids": budget_summary.get("manual_budget_override_eval_ids", ""),
         "final_notice_id": doc_meta.get("final_notice_id", ""),
         "notice_id_status": doc_meta.get("notice_id_status", ""),
         "final_project_duration": period_summary.get("final_project_duration", ""),
@@ -1772,13 +2028,17 @@ def validate_outputs(limit: int, output_dir: Path, summary_df: pd.DataFrame, chu
         "max_content_len": int(max(content_lens) if content_lens else 0),
         "chunks_jsonl_file_size_mib": round(chunks_path.stat().st_size / 1024 / 1024, 2) if chunks_path.exists() else 0,
         "source_store_file_size_mib": round(source_path.stat().st_size / 1024 / 1024, 2) if source_path.exists() else 0,
+        "chunks_jsonl_line_count": int(jsonl_line_count(chunks_path)),
+        "source_store_jsonl_line_count": int(jsonl_line_count(source_path)),
+        "chunks_jsonl_sha1": file_sha1(chunks_path) if chunks_path.exists() else "",
+        "source_store_jsonl_sha1": file_sha1(source_path) if source_path.exists() else "",
         "date_policy": "bid_deadline_only; posted date and bid-start date are not used",
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     if "is_eval_ground_truth" in summary_df.columns:
         eval_count = int(summary_df["is_eval_ground_truth"].astype(bool).sum())
         report["eval_physical_source_docs_included"] = eval_count
-        report["expected_eval_physical_source_docs"] = eval_count if limit == P4_125_LIMIT else None
+        report["expected_eval_physical_source_docs"] = P4_125_EVAL_DOCS if limit == P4_125_LIMIT else None
         report["additional_sampled_docs"] = int(len(summary_df) - eval_count)
     if "g2b_match_status" in summary_df.columns:
         report["g2b_match_status_counts"] = summary_df["g2b_match_status"].value_counts(dropna=False).to_dict()
@@ -1786,6 +2046,17 @@ def validate_outputs(limit: int, output_dir: Path, summary_df: pd.DataFrame, chu
         report["g2b_bid_deadline_count"] = int(((summary_df["g2b_match_status"] == "matched_active") & (summary_df["g2b_bid_deadline"].astype(str).str.strip() != "")).sum()) if "g2b_bid_deadline" in summary_df.columns else 0
         report["g2b_cancelled_only_count"] = int((summary_df["g2b_match_status"] == "cancelled_only").sum())
         report["g2b_ambiguous_active_count"] = int((summary_df["g2b_match_status"] == "ambiguous_active").sum())
+    if "final_budget_krw" in summary_df.columns:
+        budget_krw = pd.to_numeric(summary_df["final_budget_krw"], errors="coerce")
+        extracted = summary_df["final_budget_status"].astype(str).eq("extracted") if "final_budget_status" in summary_df.columns else pd.Series(False, index=summary_df.index)
+        report["small_final_budget_extracted_count"] = int((extracted & budget_krw.notna() & (budget_krw < 1_000_000)).sum())
+    if "budget_missing_reason" in summary_df.columns:
+        report["budget_missing_reason_counts"] = summary_df["budget_missing_reason"].astype(str).replace({"nan": ""}).value_counts(dropna=False).to_dict()
+        report["docs_with_budget_missing_reason"] = int((summary_df["budget_missing_reason"].astype(str).str.strip() != "").sum())
+    if "notice_base_amount" in summary_df.columns:
+        report["docs_with_notice_base_amount"] = int((summary_df["notice_base_amount"].astype(str).str.strip() != "").sum())
+    if "manual_budget_override_applied" in summary_df.columns:
+        report["manual_budget_override_count"] = int(summary_df["manual_budget_override_applied"].astype(bool).sum())
     if version == "v2":
         report["fact_status_counts"] = dict(Counter(row.get("fact_status", "") for row in chunks if row.get("chunk_type") == "fact_candidates"))
         report["fact_confidence_counts"] = dict(Counter(row.get("fact_confidence", "") for row in chunks if row.get("chunk_type") == "fact_candidates"))
@@ -1813,13 +2084,26 @@ def validate_outputs(limit: int, output_dir: Path, summary_df: pd.DataFrame, chu
         fail_reasons.append("missing_source_store_ref")
     if report.get("low_confidence_fact_embedded_count", 0) > 0:
         fail_reasons.append("low_confidence_fact_embedded")
+    if report.get("small_final_budget_extracted_count", 0) > 0:
+        fail_reasons.append("small_final_budget_extracted")
+    if report["chunks_jsonl_line_count"] and report["chunks_jsonl_line_count"] != report["chunk_count"]:
+        fail_reasons.append("chunks_file_count_mismatch")
+    if report["source_store_jsonl_line_count"] and report["source_store_jsonl_line_count"] != report["source_store_count"]:
+        fail_reasons.append("source_store_file_count_mismatch")
+    if limit == P4_125_LIMIT:
+        if report.get("document_count") != P4_125_TARGET_DOCS:
+            fail_reasons.append("unexpected_document_count")
+        if report.get("eval_physical_source_docs_included") != P4_125_EVAL_DOCS:
+            fail_reasons.append("unexpected_eval_doc_count")
+        if report.get("additional_sampled_docs") != P4_125_FILLER_DOCS:
+            fail_reasons.append("unexpected_filler_doc_count")
     report["status"] = "PASS" if not fail_reasons else "FAIL"
     report["fail_reasons"] = fail_reasons
     return report
 
 
 def write_readme(output_dir: Path, limit: int, report_v1: dict, report_v2: dict) -> None:
-    readme = f"""# parsing_p4_hwpx_{limit} Retrieval-Ready Corpus
+    readme = f"""# {output_dir.name} Retrieval-Ready Corpus
 
 HWPX 우선 파싱을 적용한 P4 mini-pilot corpus입니다.
 
@@ -1877,13 +2161,13 @@ P4 HWPX {limit} corpus를 Colab 또는 GCP에서 Chroma에 적재하고 retrieva
 기본 retrieval 실험은 아래 파일을 사용합니다.
 
 ```text
-outputs/parsing_p4_hwpx_{limit}/chunks_v2_{limit}.jsonl
+outputs/{output_dir.name}/chunks_v2_{limit}.jsonl
 ```
 
 비교 실험이 필요하면 v1 baseline도 사용할 수 있습니다.
 
 ```text
-outputs/parsing_p4_hwpx_{limit}/chunks_v1_{limit}.jsonl
+outputs/{output_dir.name}/chunks_v1_{limit}.jsonl
 ```
 
 `metadata_light_{limit}.xlsx`는 사람이 검토하기 위한 참고 파일입니다. 임베딩 대상이 아닙니다.
@@ -1979,7 +2263,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-path = Path("outputs/parsing_p4_hwpx_{limit}/chunks_v2_{limit}.jsonl")
+path = Path("outputs/{output_dir.name}/chunks_v2_{limit}.jsonl")
 chunk_types = Counter()
 fact_types = Counter()
 rows = embed_rows = duplicate_ids = empty_content = 0
@@ -2040,13 +2324,174 @@ embedding cache
     (output_dir / "CHROMA_LOAD_GUIDE.md").write_text(guide, encoding="utf-8")
 
 
-def write_p4_corpus(project_root: str | Path, limit: int = 250, verbose: bool = True, progress_every: int = 1) -> dict:
+def write_json_key_description(output_dir: Path, limit: int, report_v2: dict, manifest: dict) -> None:
+    fact_type_counts = report_v2.get("fact_type_counts", {})
+    chunk_type_counts = report_v2.get("chunk_type_counts", {})
+    description = f"""# {output_dir.name} JSON Key 설명서
+
+이 문서는 `{output_dir.name}` 산출물의 JSON/JSONL key를 설명합니다.
+
+- corpus_name: `{manifest.get('corpus_name', f'p4_hwpx_{limit}')}`
+- corpus_version: `{manifest.get('corpus_version', '')}`
+- parser_version: `{manifest.get('parser_version', '')}`
+- 기본 retrieval 파일: `chunks_v2_{limit}.jsonl`
+- baseline 비교 파일: `chunks_v1_{limit}.jsonl`
+- source 원문 조회 파일: `source_store_{limit}.jsonl`
+- 문서 수: {report_v2.get('document_count', limit)}개
+- eval 정답 문서 포함 수: {report_v2.get('eval_physical_source_docs_included', P4_125_EVAL_DOCS)}개
+- 추가 선별 문서 수: {report_v2.get('additional_sampled_docs', P4_125_FILLER_DOCS)}개
+
+`jsonl`은 한 줄에 JSON 객체 하나가 들어가는 형식입니다. 파일 전체가 하나의 JSON 배열이 아니라 각 줄이 독립적인 record입니다.
+
+## 1. 대상 파일
+
+| 파일 | 단위 | 설명 |
+|---|---:|---|
+| `chunks_v2_{limit}.jsonl` | chunk | 기본 retrieval corpus입니다. text/table/fact 후보를 포함합니다. |
+| `chunks_v1_{limit}.jsonl` | chunk | clean text baseline입니다. table/fact 개선 효과 비교에 사용합니다. |
+| `source_store_{limit}.jsonl` | source block | v2 chunk의 긴 원문/표 구조 조회용 파일입니다. Chroma에 그대로 넣지 않습니다. |
+| `source_store_v1_{limit}.jsonl` | source block | v1 baseline chunk의 원문 조회용 파일입니다. |
+| `metadata_light_{limit}.xlsx` | document | 문서별 파싱 결과, 최종 추출값, G2B 매칭 상태를 요약한 엑셀입니다. |
+| `pilot_docs_{limit}.csv` | document | 125개 문서 선택 결과와 eval/filler 구분 정보입니다. |
+| `manifest.json` | summary | corpus 구성 규칙, parser version, hash, 파일명을 기록합니다. |
+| `validation_report.json` | summary | v2 corpus 검증 결과입니다. |
+
+## 2. Chroma 적재 매핑
+
+```python
+collection.add(
+    ids=[record["chunk_id"]],
+    documents=[record["content"]],
+    metadatas=[record["metadata"]],
+)
+```
+
+| P4 JSONL key | Chroma 입력 | 설명 |
+|---|---|---|
+| `chunk_id` | `ids` | Chroma 고유 ID입니다. 중복되면 안 됩니다. |
+| `content` | `documents` | 실제 임베딩/검색에 사용할 chunk 본문입니다. |
+| `metadata` | `metadatas` | 필터링, 출처 표시, 분석에 필요한 짧은 scalar metadata입니다. |
+
+## 3. chunks_v2_{limit}.jsonl 최상위 key
+
+| key | 설명 |
+|---|---|
+| `chunk_id` | chunk 고유 ID입니다. |
+| `doc_id` | 파일명 기반 내부 문서 ID입니다. |
+| `doc_key` | 확장자와 일부 표기 차이를 줄인 문서 식별명입니다. |
+| `source_file` | 원본 파일명입니다. |
+| `source_format` | 실제 파싱에 사용된 형식입니다. 예: `hwpx`, `pdf`, `hwp_fallback` |
+| `chunk_type` | chunk 종류입니다. 예: `text`, `table`, `fact_candidates`, `toc` |
+| `embed_enabled` | 기본 임베딩 대상 여부입니다. `false`면 Chroma 적재에서 제외합니다. |
+| `content` | 임베딩할 검색용 텍스트입니다. |
+| `metadata` | Chroma metadata로 넣기 좋은 짧은 dict입니다. |
+| `source_ref` | 긴 원문 또는 표 구조를 `source_store_{limit}.jsonl`에서 찾기 위한 참조 dict입니다. |
+| `fact_type` | `chunk_type='fact_candidates'`일 때 fact 목적을 나타냅니다. |
+| `fact_status` | fact 추출 상태입니다. |
+| `fact_confidence` | fact 신뢰도입니다. low-confidence fact는 기본적으로 embed 대상에서 제외합니다. |
+| `evidence_text_short` | fact 판단의 짧은 근거 문장입니다. |
+
+## 4. chunk_type 값
+
+| chunk_type | row 수 | 설명 |
+|---|---:|---|
+| `text` | {chunk_type_counts.get('text', 0)} | 일반 본문 문단 기반 chunk입니다. |
+| `table` | {chunk_type_counts.get('table', 0)} | HWPX/PDF에서 추출한 표 기반 chunk입니다. |
+| `fact_candidates` | {chunk_type_counts.get('fact_candidates', 0)} | 문서 전체에서 뽑은 핵심 정보 chunk입니다. |
+| `toc` | {chunk_type_counts.get('toc', 0)} | 목차/구조용 chunk입니다. 기본 검색에서는 제외합니다. |
+
+## 5. fact_type 값
+
+| fact_type | row 수 | 설명 |
+|---|---:|---|
+| `document_summary` | {fact_type_counts.get('document_summary', 0)} | 문서명, alias, 발주기관, 사업유형, 예산/기간/마감/제출/자격 신호를 모은 요약 chunk입니다. |
+| `budget` | {fact_type_counts.get('budget', 0)} | 사업금액/사업비/예산/기초금액/미기재 예산 상태 관련 chunk입니다. |
+| `duration` | {fact_type_counts.get('duration', 0)} | 사업기간/수행기간/계약기간/유지보수기간 관련 chunk입니다. |
+| `bid_deadline` | {fact_type_counts.get('bid_deadline', 0)} | 입찰마감일/제출마감 관련 chunk입니다. |
+| `submission_documents` | {fact_type_counts.get('submission_documents', 0)} | 제출서류명 관련 chunk입니다. |
+| `submission_logistics` | {fact_type_counts.get('submission_logistics', 0)} | 제출방법/제출장소/제출처 관련 chunk입니다. |
+| `eligibility` | {fact_type_counts.get('eligibility', 0)} | 입찰참가자격/자격요건/공동수급/실적 관련 chunk입니다. |
+| `business_type` | {fact_type_counts.get('business_type', 0)} | 구축/운영/유지관리/고도화/보안/클라우드 등 사업유형 후보 chunk입니다. |
+
+## 6. metadata 내부 key
+
+| key | 설명 |
+|---|---|
+| `doc_id`, `doc_key`, `source_file`, `source_format` | 문서 식별과 출처 표시용 기본값입니다. |
+| `chunk_type`, `section_path`, `section_type` | chunk 종류와 문서 내 위치입니다. |
+| `issuer`, `project_name` | 발주기관과 사업명 후보입니다. |
+| `g2b_notice_id`, `g2b_bid_deadline` | G2B에서 보수적으로 병합한 공고번호와 입찰마감일시입니다. 게시일자는 사용하지 않습니다. |
+| `fact_type`, `fact_status`, `fact_confidence` | fact chunk 분석용 key입니다. |
+| `table_role`, `table_signal_score`, `table_embed_reason` | table chunk의 검색 가치 판단 결과입니다. |
+
+## 7. 새로 강화된 key
+
+| key | 설명 |
+|---|---|
+| `notice_base_amount` | `기초금액`, `예정가격`, `추정가격`처럼 실제 사업예산과 분리해야 하는 조달 기준 금액입니다. |
+| `budget_missing_reason` | 예산이 미기재/비공개/문서상 미포함일 때 사유를 기록합니다. |
+| `budget_value_role` | 금액의 역할입니다. 예: `actual_project_budget`, `notice_base_amount`, `symbolic_notice_base_amount`, `missing_budget` |
+| `project_family_key` | 재공고/원공고/유사 공고를 분석할 때 쓰는 문서 family key입니다. 병합 key가 아니라 관계 확인용입니다. |
+| `notice_prefix_flags` | 파일명/사업명에서 감지한 접두어 flag입니다. 예: `reannouncement`, `urgent`, `fingerprint`, `international` |
+| `is_reannouncement` | 재공고/재입찰 계열 여부입니다. |
+| `aliases` | 원문 파일명, 정규화명, 접두어 제거명, 공백/괄호 제거명을 묶은 검색 보강 alias 문자열입니다. |
+
+## 8. source_store_{limit}.jsonl key
+
+| key | 설명 |
+|---|---|
+| `source_store_id` | chunk의 `source_ref.source_store_id`와 연결되는 상세 근거 ID입니다. |
+| `full_text` | chunk보다 긴 원문 또는 fact/table 원문입니다. |
+| `table_structure` | table block일 때 행/열, 병합 셀, row type 등 표 구조 정보입니다. |
+| `final_budget`, `notice_base_amount`, `budget_missing_reason` | 문서 단위 예산 판단 결과입니다. |
+| `final_bid_deadline`, `g2b_bid_deadline` | 원문/G2B 기준 입찰마감일시입니다. 게시일자는 사용하지 않습니다. |
+
+주의: `source_store`는 크기가 크고 GitHub 업로드 대상이 아닙니다. 검색 UI나 정성 분석에서 원문 근거를 확인할 때만 사용합니다.
+
+## 9. 예산 정책 요약
+
+- `final_budget`은 실제 사업예산으로 볼 수 있는 금액만 사용합니다.
+- `기초금액`, `예정가격`, `추정가격` 단독 문맥은 `final_budget`이 아니라 `notice_base_amount`로 분리합니다.
+- `1원`, `0원`, 소액 금액은 실제 사업예산으로 쓰지 않습니다.
+- `미기재`, `비공개`, `사업예산 미포함`은 `budget_missing_reason`으로 남깁니다.
+
+## 10. 적재 시 필수 필터
+
+```python
+if record.get("embed_enabled") is not True:
+    continue
+if record.get("chunk_type") == "toc":
+    continue
+if not str(record.get("content", "")).strip():
+    continue
+```
+"""
+    (output_dir / "json_key_description.md").write_text(description, encoding="utf-8")
+
+
+def write_chroma_load_example(output_dir: Path, limit: int) -> None:
+    template = output_dir.parent / P4_125_OUTPUT_NAME / "chroma_load_example.py"
+    target = output_dir / "chroma_load_example.py"
+    if template.exists():
+        text = template.read_text(encoding="utf-8")
+        text = text.replace(P4_125_OUTPUT_NAME, output_dir.name)
+        text = text.replace(f"chroma_p4_hwpx_{limit}", f"chroma_{output_dir.name}")
+        target.write_text(text, encoding="utf-8")
+
+
+def write_p4_corpus(
+    project_root: str | Path,
+    limit: int = 250,
+    verbose: bool = True,
+    progress_every: int = 1,
+    output_dir_name: str | None = None,
+) -> dict:
     def log(message: str) -> None:
         if verbose:
             print(message, flush=True)
 
     project_root = Path(project_root).resolve()
-    output_dir = project_root / "outputs" / f"parsing_p4_hwpx_{limit}"
+    output_dir = project_root / "outputs" / (output_dir_name or f"parsing_p4_hwpx_{limit}")
     output_dir.mkdir(parents=True, exist_ok=True)
     log(f"[p4] project_root={project_root}")
     log(f"[p4] output_dir={output_dir}")
@@ -2060,11 +2505,13 @@ def write_p4_corpus(project_root: str | Path, limit: int = 250, verbose: bool = 
     log(f"[inputs] hwpx_lookup={len(hwpx_lookup)}")
     g2b_records = load_g2b_records(project_root)
     log(f"[inputs] g2b_records={len(g2b_records)} date_policy=bid_deadline_only")
+    budget_overrides = load_budget_policy_overrides(project_root)
+    log(f"[inputs] budget_policy_overrides={len(budget_overrides)}")
     artifacts = []
     total_docs = len(sample_df)
     for doc_index, (_, row) in enumerate(sample_df.iterrows(), start=1):
         doc_started = time.time()
-        artifact = build_doc_artifacts(row.to_dict(), project_root, hwpx_lookup, g2b_records)
+        artifact = build_doc_artifacts(row.to_dict(), project_root, hwpx_lookup, g2b_records, budget_overrides)
         artifacts.append(artifact)
         if verbose and (doc_index == 1 or doc_index == total_docs or doc_index % max(1, progress_every) == 0):
             summary = artifact["summary"]
@@ -2124,6 +2571,8 @@ def write_p4_corpus(project_root: str | Path, limit: int = 250, verbose: bool = 
         "corpus_version": "v2_hwpx_precision_fact_table_aware",
         "baseline_version": "v1_clean_text",
         "document_count": limit,
+        "output_dir": str(output_dir),
+        "output_dir_name": output_dir.name,
         "sample_source": selection_report.get("sample_source", paths["pilot_docs"].name),
         "selection": selection_report,
         "parser_version": PARSER_VERSION,
@@ -2138,6 +2587,12 @@ def write_p4_corpus(project_root: str | Path, limit: int = 250, verbose: bool = 
         "chroma_load_guide_file": "CHROMA_LOAD_GUIDE.md",
         "json_key_description_file": "json_key_description.md",
         "chroma_load_example_file": "chroma_load_example.py",
+        "file_hashes": {
+            "chunks_v1_sha1": report_v1.get("chunks_jsonl_sha1", ""),
+            "chunks_v2_sha1": report_v2.get("chunks_jsonl_sha1", ""),
+            "source_store_v1_sha1": report_v1.get("source_store_jsonl_sha1", ""),
+            "source_store_v2_sha1": report_v2.get("source_store_jsonl_sha1", ""),
+        },
         "chunk_max_chars": CHUNK_MAX_CHARS,
         "chunk_overlap": CHUNK_OVERLAP,
         "hwpx_parsing_used": True,
@@ -2157,12 +2612,22 @@ def write_p4_corpus(project_root: str | Path, limit: int = 250, verbose: bool = 
             "duplicate_resolution": "prefer active notices, higher title/agency match score, higher notice revision suffix, 공고 유형 priority, then later 입찰마감일시; no 게시일자 sorting",
             "ambiguous_policy": "close active matches with different notice bases are marked ambiguous_active and not merged as final metadata",
         },
+        "budget_policy": {
+            "final_budget_rule": "actual project budget only; symbolic 1원 and 미기재/0원 are not stored as final_budget",
+            "small_amount_threshold_krw": 1_000_000,
+            "manual_override_file": str(MANUAL_BUDGET_OVERRIDE_PATH),
+            "manual_override_count": len(budget_overrides),
+            "notice_base_amount_field": "notice_base_amount",
+            "missing_budget_field": "budget_missing_reason",
+        },
         "github_upload_policy": "commit code, notebooks, README/guide, manifest, validation reports only; do not commit source_store, original files, Chroma DB, or embedding cache",
         "created_at": report_v2["created_at"],
     }
     paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     write_readme(output_dir, limit, report_v1, report_v2)
     write_chroma_load_guide(output_dir, limit)
+    write_json_key_description(output_dir, limit, report_v2, manifest)
+    write_chroma_load_example(output_dir, limit)
     table_preview_rows = []
     for source in source_store_v2:
         if source.get("source_type") != "table":

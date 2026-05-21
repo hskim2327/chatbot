@@ -417,7 +417,7 @@ if doc_key == "사단법인 보험개발원_실손보험 청구 전산화 시스
 권장 파일:
 
 ```text
-data/manual_overrides/budget_policy_overrides.csv
+config/manual_overrides/budget_policy_overrides.csv
 ```
 
 권장 컬럼:
@@ -674,6 +674,48 @@ merged_cell_count: 161,392
 다만 table chunk가 크게 증가했으므로 retrieval 실험에서 noise 여부를 반드시 확인해야 함.
 특히 cover/table-of-contents/layout table이 검색 상위권에 과도하게 섞이면 table filtering 또는 embed_enabled 조정이 필요함.
 ```
+
+## 125 `_0521` Eval-Covered Mini-Pilot 결정
+
+현재 125 반복 실험은 과거 전체 eval 기준이 아니라, 로컬에 공유된 `data/eval/eval_batch_01~25` 500문항 기준으로 수행한다.
+
+중요 기준:
+
+```text
+현재 eval rows: 500
+현재 eval unique physical source docs: 40
+P4 HWPX 125 문서 구성: 40 eval docs + 85 filler docs
+출력 폴더: outputs/parsing_p4_hwpx_125_0521/
+파일명: 기존 형식 유지, 0521은 폴더명에만 사용
+```
+
+과거 문서에 남아 있는 `61개 eval physical source docs`는 전체/레거시 eval 기준이다. 현재 125 `_0521` acceptance 기준으로 사용하지 않는다.
+
+125 `_0521` 생성 시 validation 기준:
+
+```text
+document_count == 125
+eval_physical_source_docs_included == 40
+additional_sampled_docs == 85
+missing_eval_gt_docs == []
+duplicate_chunk_id_count == 0
+duplicate_source_store_id_count == 0
+missing_source_store_ref == 0
+```
+
+이번 `_0521`에서 추가 반영할 수정:
+
+```text
+기초금액/예정가격/추정가격 단독 문맥은 final_budget에서 제외하고 notice_base_amount로 분리
+1원/0원/소액 금액은 실제 사업예산으로 승격하지 않음
+budget_value_role로 actual_project_budget / notice_base_amount / symbolic_notice_base_amount / missing_budget 구분
+재공고/원공고는 병합하지 않고 project_family_key와 notice_prefix_flags로 관계만 표시
+document_summary에 source_file, alias, 접두어 제거 사업명, 발주기관, 사업유형, 예산 상태, 마감/제출/자격 신호 포함
+목차/표지/layout table은 embed_enabled=false로 낮춤
+manifest와 validation_report에는 chunks/source_store hash와 line count를 기록
+```
+
+`json_key_description.md`는 새 폴더에 함께 생성한다. 이 문서는 `chunks_v2_125.jsonl`, `source_store_125.jsonl`, `metadata_light_125.xlsx`, `manifest.json`, `validation_report.json`의 key와 Chroma 적재 매핑을 설명한다.
 
 ## 리스크와 대응
 
