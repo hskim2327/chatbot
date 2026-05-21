@@ -902,18 +902,66 @@ def normalize_amount_to_krw(num_text: str, unit: str) -> int | None:
     return int(value)
 
 
+def budget_amount_semantics(raw_amount: str, amount_krw: int | None, context: str) -> str:
+    context = str(context or "")
+    compact_context = compact_label_text(context)
+    raw_amount = str(raw_amount or "")
+    if amount_krw is None:
+        return "unknown"
+    missing_terms = ["미기재", "비공개", "공개하지 않음", "포함되지 않음", "확정 예산 없음", "예산 없음"]
+    if amount_krw == 0 or any(term in context or term in compact_context for term in missing_terms):
+        return "missing_encoded_zero"
+    actual_budget_terms = ["소요예산", "사업예산", "사업비", "총사업비", "사업금액", "배정예산", "예산액"]
+    procurement_reference_terms = ["기초금액", "예정가격", "추정가격"]
+    has_actual_budget_context = any(term in context or term in compact_context for term in actual_budget_terms)
+    has_procurement_reference_context = any(term in context or term in compact_context for term in procurement_reference_terms)
+    if amount_krw == 1:
+        if has_procurement_reference_context or any(term in context or term in compact_context for term in ["공고문", "상징", "형식상", "표본"]):
+            return "symbolic_placeholder"
+        return "small_non_budget_amount"
+    if 0 < amount_krw < 1_000_000:
+        return "small_non_budget_amount"
+    if has_procurement_reference_context and not has_actual_budget_context:
+        return "notice_base_amount"
+    if not has_actual_budget_context:
+        return "non_project_budget_amount"
+    return "actual_project_budget_candidate"
+
+
+def detect_budget_missing_context(text: str) -> tuple[str, str]:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text:
+        return "", ""
+    patterns = [
+        r"(사업예산|사업\s*예산|예산액|사업비|사업금액)[^。.\n]{0,80}(포함되지\s*않음|공개하지\s*않음|비공개|미기재|명시되지\s*않음)",
+        r"(포함되지\s*않음|공개하지\s*않음|비공개|미기재|명시되지\s*않음)[^。.\n]{0,80}(사업예산|사업\s*예산|예산액|사업비|사업금액)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            start = max(0, match.start() - 80)
+            end = min(len(text), match.end() + 120)
+            return "not_disclosed_or_not_specified", text[start:end].strip()
+    return "", ""
+
+
 def score_budget_candidate(candidate: dict) -> tuple[int, list[str]]:
     context = str(candidate.get("context") or "")
     compact_context = compact_label_text(context)
     amount_krw = candidate.get("amount_krw")
     score = 0
     reasons = []
-    strong_keywords = ["소요예산", "사업예산", "예산액", "사업비", "총사업비", "기초금액", "추정가격", "배정예산"]
+    strong_keywords = ["소요예산", "사업예산", "예산액", "사업비", "총사업비", "사업금액", "배정예산"]
+    reference_keywords = ["기초금액", "예정가격", "추정가격"]
     weak_keywords = ["계약금액", "부가세", "VAT", "원"]
     for keyword in strong_keywords:
         if keyword in context or keyword in compact_context:
             score += 18
             reasons.append(keyword)
+    for keyword in reference_keywords:
+        if keyword in context or keyword in compact_context:
+            score += 6
+            reasons.append(f"reference:{keyword}")
     for keyword in weak_keywords:
         if keyword in context or keyword in compact_context:
             score += 5
@@ -925,6 +973,10 @@ def score_budget_candidate(candidate: dict) -> tuple[int, list[str]]:
         elif amount_krw < 1_000_000:
             score -= 10
             reasons.append("too_small")
+    semantics = budget_amount_semantics(candidate.get("raw_amount", ""), amount_krw, context)
+    if semantics in {"symbolic_placeholder", "missing_encoded_zero", "small_non_budget_amount", "notice_base_amount", "non_project_budget_amount"}:
+        score -= 30
+        reasons.append(semantics)
     if any(word in context for word in ["평가", "배점", "점수", "개월", "일", "부", "명"]):
         score -= 8
         reasons.append("non_budget_hint")
@@ -952,6 +1004,7 @@ def extract_budget_candidates(text: str, doc_meta: dict) -> list[dict]:
             "context": context,
             "line_index": (text[:start].count("\n") + 1) if text else 0,
         }
+        item["amount_semantics"] = budget_amount_semantics(raw_amount, amount_krw, context)
         score, reasons = score_budget_candidate(item)
         item["score"] = score
         item["score_reasons"] = reasons
@@ -984,19 +1037,68 @@ def extract_budget_candidates(text: str, doc_meta: dict) -> list[dict]:
     return unique[:30]
 
 
-def select_final_budget(candidates: list[dict]) -> dict:
+def select_final_budget(candidates: list[dict], text: str | None = None) -> dict:
     valid = [
         item for item in candidates
         if item.get("amount_krw") is not None
         and int(item.get("amount_krw") or 0) >= 1_000_000
+        and item.get("amount_semantics") == "actual_project_budget_candidate"
         and int(item.get("score", 0)) >= 15
     ]
     if not valid:
-        return {
+        symbolic = [item for item in candidates if item.get("amount_semantics") == "symbolic_placeholder"]
+        notice_base = [item for item in candidates if item.get("amount_semantics") == "notice_base_amount"]
+        missing_zero = [item for item in candidates if item.get("amount_semantics") == "missing_encoded_zero"]
+        missing_reason, missing_evidence = detect_budget_missing_context(text or "")
+        status = "missing" if not candidates or symbolic or missing_zero or missing_reason else "candidate_only"
+        result = {
             "final_budget": "",
             "final_budget_krw": "",
-            "final_budget_status": "missing" if not candidates else "candidate_only",
+            "final_budget_status": status,
             "final_budget_evidence": "",
+            "budget_missing_reason": missing_reason,
+            "budget_policy_note": "",
+            "budget_value_role": "missing_budget" if status == "missing" else "candidate_only",
+            "notice_base_amount": "",
+            "notice_base_amount_krw": "",
+            "notice_base_amount_status": "",
+            "notice_base_amount_source": "",
+            "notice_base_amount_evidence": "",
+            "small_amount_candidate_count": int(sum(1 for item in candidates if item.get("amount_semantics") == "small_non_budget_amount")),
+            "symbolic_placeholder_amount_count": int(len(symbolic)),
+            "notice_base_amount_candidate_count": int(len(notice_base)),
+            "zero_missing_candidate_count": int(len(missing_zero)),
+        }
+        if missing_zero and not result["budget_missing_reason"]:
+            result["budget_missing_reason"] = "not_disclosed_or_not_specified"
+            missing_evidence = missing_zero[0].get("context", "")
+        if result["budget_missing_reason"]:
+            result["budget_policy_note"] = "0원/미기재/비공개 표현은 실제 사업예산이 아니라 미공개 또는 미기재로 해석"
+            result["final_budget_evidence"] = missing_evidence
+        if symbolic:
+            item = sorted(symbolic, key=lambda row: (-int(row.get("score", 0)), row.get("line_index", 0)))[0]
+            result.update({
+                "notice_base_amount": item.get("raw_amount", ""),
+                "notice_base_amount_krw": item.get("amount_krw", ""),
+                "notice_base_amount_status": "symbolic_placeholder",
+                "notice_base_amount_source": "notice_document",
+                "notice_base_amount_evidence": item.get("context", ""),
+                "budget_value_role": "symbolic_notice_base_amount",
+                "budget_policy_note": "기초금액 1원은 실제 사업예산으로 보지 않고 별도 상징 금액으로 분리",
+            })
+        elif notice_base:
+            item = sorted(notice_base, key=lambda row: (-int(row.get("score", 0)), -(row.get("amount_krw") or 0), row.get("line_index", 0)))[0]
+            result.update({
+                "notice_base_amount": item.get("raw_amount", ""),
+                "notice_base_amount_krw": item.get("amount_krw", ""),
+                "notice_base_amount_status": "procurement_reference",
+                "notice_base_amount_source": "notice_document",
+                "notice_base_amount_evidence": item.get("context", ""),
+                "budget_value_role": "notice_base_amount",
+                "budget_policy_note": "기초금액/예정가격/추정가격 단독 문맥은 실제 사업예산으로 보지 않고 조달 기준 금액으로 분리",
+            })
+        return {
+            **result,
         }
     best = sorted(valid, key=lambda row: (-int(row.get("score", 0)), -(row.get("amount_krw") or 0), row.get("line_index", 0)))[0]
     return {
@@ -1004,6 +1106,18 @@ def select_final_budget(candidates: list[dict]) -> dict:
         "final_budget_krw": best.get("amount_krw", ""),
         "final_budget_status": "extracted",
         "final_budget_evidence": best.get("context", ""),
+        "budget_missing_reason": "",
+        "budget_policy_note": "",
+        "budget_value_role": "actual_project_budget",
+        "notice_base_amount": "",
+        "notice_base_amount_krw": "",
+        "notice_base_amount_status": "",
+        "notice_base_amount_source": "",
+        "notice_base_amount_evidence": "",
+        "small_amount_candidate_count": int(sum(1 for item in candidates if item.get("amount_semantics") == "small_non_budget_amount")),
+        "symbolic_placeholder_amount_count": int(sum(1 for item in candidates if item.get("amount_semantics") == "symbolic_placeholder")),
+        "notice_base_amount_candidate_count": int(sum(1 for item in candidates if item.get("amount_semantics") == "notice_base_amount")),
+        "zero_missing_candidate_count": int(sum(1 for item in candidates if item.get("amount_semantics") == "missing_encoded_zero")),
     }
 
 
@@ -2027,6 +2141,14 @@ def block_common_metadata(doc_meta: dict) -> dict:
         "final_budget_krw": str(doc_meta.get("final_budget_krw") or ""),
         "final_budget_status": str(doc_meta.get("final_budget_status") or ""),
         "final_budget_evidence": str(doc_meta.get("final_budget_evidence") or ""),
+        "budget_missing_reason": str(doc_meta.get("budget_missing_reason") or ""),
+        "budget_policy_note": str(doc_meta.get("budget_policy_note") or ""),
+        "budget_value_role": str(doc_meta.get("budget_value_role") or ""),
+        "notice_base_amount": str(doc_meta.get("notice_base_amount") or ""),
+        "notice_base_amount_krw": str(doc_meta.get("notice_base_amount_krw") or ""),
+        "notice_base_amount_status": str(doc_meta.get("notice_base_amount_status") or ""),
+        "notice_base_amount_source": str(doc_meta.get("notice_base_amount_source") or ""),
+        "notice_base_amount_evidence": str(doc_meta.get("notice_base_amount_evidence") or ""),
         "published_at": str(doc_meta.get("published_at") or ""),
         "bid_start": str(doc_meta.get("bid_start") or ""),
         "bid_deadline": str(doc_meta.get("bid_deadline") or ""),
@@ -2619,7 +2741,7 @@ def run_parsing_pipeline(paths: dict[str, Path], pilot_docs_df: pd.DataFrame | N
             "notice_id_evidence": notice_summary["notice_id_evidence"],
         })
         budget_candidates = extract_budget_candidates(clean_text, doc_meta)
-        budget_summary = select_final_budget(budget_candidates)
+        budget_summary = select_final_budget(budget_candidates, clean_text)
         date_candidates = extract_date_candidates(clean_text, doc_meta)
         date_summary = select_final_dates(date_candidates)
         period_candidates = extract_period_candidates(clean_text, doc_meta)
@@ -2810,4 +2932,3 @@ def run_parsing_pipeline(paths: dict[str, Path], pilot_docs_df: pd.DataFrame | N
     paths["parsing_summary_json"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     write_summary_markdown(paths["parsing_summary_md"], summary)
     return summary, doc_summary_df
-

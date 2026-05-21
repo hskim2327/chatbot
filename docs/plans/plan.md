@@ -26,15 +26,17 @@
 - 최신 메타데이터 행 수: 690개 문서 수준
 - 파일 형식: HWP 665개, PDF 25개
 - 메타데이터 컬럼: 공고 번호, 공고 차수, 사업명, 사업 금액, 발주 기관, 공개 일자, 입찰 참여 시작일, 입찰 참여 마감일, 사업 요약, 파일형식, 파일명, 텍스트
-- 평가 CSV: 38개 배치, 총 1,100문항
+- 평가 CSV: 전체 기준으로는 38개 배치, 총 1,100문항이 존재했으나, 현재 반복 실험용 공유 eval은 `eval_batch_01~25`의 500문항을 기준으로 한다.
 - 평가 CSV 컬럼: `id`, `type`, `difficulty`, `question`, `ground_truth_answer`, `ground_truth_docs`, `metadata_filter`, `history`
-- 평가 CSV의 `ground_truth_docs`에 실제 정답 문서로 등장하는 unique 문서는 확장자 정규화 후 62개다.
+- 과거 전체 eval 기준에서는 `ground_truth_docs`에 등장하는 unique alias가 62개, 물리 source file 기준이 61개였다.
+- 현재 P4 HWPX 125 `_0521` 반복 실험 기준은 `eval_batch_01~25` 500문항에서 정규화 중복 제거한 물리 source file 40개다.
 
 주의할 점:
 
 - `data_list_advanced.xlsx`의 `텍스트`는 690개 모두 채워져 있지만, 원본 구조 전체를 보장하는 DB 원천으로 단정하지 않는다. 메타데이터와 빠른 sanity check에는 활용하되, 최종 구조화 DB는 원본 HWP/PDF 재추출 결과와 비교한다.
 - 이전 `data_list_reparsed.xlsx`의 98개와 평가셋 누락 3개로 추정했던 101개 기준은 과거 subset으로만 취급한다.
-- 전체 DB 구축 기준은 `advanced_690`이며, 반복 실험 속도를 위해 `eval_answer_docs_62`를 포함한 pilot subset을 먼저 사용할 수 있다.
+- 전체 DB 구축 기준은 `advanced_690`이며, 반복 실험 속도를 위해 현재 공유 eval 기준의 정답 문서 40개를 포함한 pilot subset을 먼저 사용할 수 있다.
+- P4 HWPX 125 `_0521` corpus는 `40개 eval 문서 + 85개 filler 문서 = 125개` 구성을 기준으로 한다. 과거 61개 기준은 전체/레거시 eval 설명으로만 남기고, 현재 125 acceptance 기준으로 사용하지 않는다.
 - 원본 RFP 전체 데이터셋과 대용량 파싱 산출물은 용량 문제 때문에 GitHub에 올리지 않는다.
 - 팀 실험용 GCP/GCS 환경에는 원본 데이터를 업로드할 수 있다.
 - Chroma DB, 원본 텍스트 캐시, API key, `.env` 파일은 GitHub에 올리지 않는다.

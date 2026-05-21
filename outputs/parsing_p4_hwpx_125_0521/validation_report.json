@@ -1,0 +1,96 @@
+{
+  "output_dir": "/Users/apple/Desktop/codeit/project_2nd/chatbot/outputs/parsing_p4_hwpx_125_0521",
+  "version": "v2",
+  "document_count": 125,
+  "parse_success_docs": 125,
+  "parse_failed_docs": 0,
+  "source_format_counts": {
+    "hwpx": 113,
+    "pdf": 12
+  },
+  "total_table_count": 13585,
+  "total_image_count": 609,
+  "chunk_count": 22408,
+  "source_store_count": 16865,
+  "duplicate_doc_id_count": 0,
+  "duplicate_chunk_id_count": 0,
+  "duplicate_source_store_id_count": 0,
+  "missing_source_store_ref": 0,
+  "missing_doc_key_count": 0,
+  "embed_enabled_count": 18295,
+  "chunk_type_counts": {
+    "toc": 56,
+    "text": 5795,
+    "fact_candidates": 959,
+    "table": 15598
+  },
+  "avg_content_len": 541.25,
+  "p50_content_len": 432,
+  "p95_content_len": 992,
+  "max_content_len": 1000,
+  "chunks_jsonl_file_size_mib": 56.16,
+  "source_store_file_size_mib": 108.36,
+  "chunks_jsonl_line_count": 22408,
+  "source_store_jsonl_line_count": 16865,
+  "chunks_jsonl_sha1": "1d7ad9a0105051241ae4dc60335aedff8ceebe49",
+  "source_store_jsonl_sha1": "1068aaa1190c40ff76f1d7cc86b7d8678cce9154",
+  "date_policy": "bid_deadline_only; posted date and bid-start date are not used",
+  "created_at": "2026-05-21 15:31:09",
+  "eval_physical_source_docs_included": 40,
+  "expected_eval_physical_source_docs": 40,
+  "additional_sampled_docs": 85,
+  "g2b_match_status_counts": {
+    "no_confident_match": 56,
+    "matched_active": 48,
+    "ambiguous_active": 21
+  },
+  "g2b_active_match_count": 48,
+  "g2b_bid_deadline_count": 37,
+  "g2b_cancelled_only_count": 0,
+  "g2b_ambiguous_active_count": 21,
+  "small_final_budget_extracted_count": 0,
+  "budget_missing_reason_counts": {
+    "": 121,
+    "not_disclosed_or_not_specified": 4
+  },
+  "docs_with_budget_missing_reason": 4,
+  "docs_with_notice_base_amount": 2,
+  "manual_budget_override_count": 1,
+  "fact_status_counts": {
+    "extracted": 954,
+    "missing_budget": 3,
+    "symbolic_placeholder": 2
+  },
+  "fact_confidence_counts": {
+    "high": 809,
+    "medium": 150
+  },
+  "fact_type_counts": {
+    "document_summary": 216,
+    "budget": 102,
+    "duration": 118,
+    "submission_documents": 113,
+    "submission_logistics": 118,
+    "eligibility": 118,
+    "business_type": 125,
+    "bid_deadline": 49
+  },
+  "low_confidence_fact_embedded_count": 0,
+  "table_role_counts": {
+    "weak_table": 2865,
+    "layout_or_toc": 1192,
+    "generic_table": 1889,
+    "retrieval_signal": 9652
+  },
+  "suppressed_table_chunk_count": 4057,
+  "row_type_counts": {
+    "group_title": 22556,
+    "blank": 4851,
+    "body": 44642,
+    "header_candidate": 22153,
+    "note": 326
+  },
+  "merged_cell_count": 80365,
+  "status": "PASS",
+  "fail_reasons": []
+}

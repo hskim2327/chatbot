@@ -1,0 +1,2 @@
+norm_name,override_type,amount_text,amount_krw,amount_semantics,target_field,evidence,applies_to_eval_ids,note
+사단법인 보험개발원_실손보험 청구 전산화 시스템 구축 사업,notice_base_amount,1원,1,symbolic_placeholder,notice_base_amount,eval 정답 기준 공고문상 기초금액은 1원이나 RFP 본문은 사업예산 미포함으로 확인됨,Q203|Q209|Q239|Q261,final_budget에는 반영하지 않음
