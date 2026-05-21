@@ -272,8 +272,6 @@ row body = "세부시설: 기계실 | 면적: 48.1m2"
 ```text
 사업금액
 사업기간
-공고일자
-입찰시작일
 입찰마감일
 제안서 제출 일자
 제출 방법
@@ -284,6 +282,8 @@ row body = "세부시설: 기계실 | 면적: 48.1m2"
 하자담보책임기간
 무상유지보수기간
 ```
+
+날짜 관련 fact는 입찰마감일을 우선한다. 게시일자/공고일자는 검색 content나 final fact로 사용하지 않는다.
 
 예시:
 
@@ -310,6 +310,221 @@ needs_review fact -> embed_enabled=false
 계약 후 N일 이내 제출/승인/착수 표현은 사업기간으로 확정하지 않음
 사업금액은 사업비/예산/추정금액/배정예산 주변 키워드를 우선함
 ```
+
+## Budget Semantics And Override Policy
+
+사업금액은 RFP retrieval에서 중요한 key지만, 모든 금액 표현을 같은 의미로 취급하면 안 된다.
+
+특히 아래 두 유형은 일반 `final_budget`으로 넣지 않는다.
+
+```text
+1. symbolic placeholder amount
+   예: 공고문 기초금액 1원
+
+2. missing budget encoded as zero
+   예: 미기재(0원), 명시적 0원 처리
+```
+
+### 원칙
+
+`final_budget`은 실제 사업예산 또는 실제 집행 한도로 해석할 수 있는 값만 저장한다.
+
+```text
+final_budget = 실제 사업예산
+final_budget_krw = 실제 사업예산의 원화 숫자값
+final_budget_status = extracted | candidate_only | missing
+```
+
+아래 값은 `final_budget`에 넣지 않는다.
+
+```text
+1원
+0원
+미기재(0원)
+상징적 기초금액
+서식 예시의 1 원 / 2 원
+하도급 양식의 번호성 금액
+```
+
+전역 small amount 필터는 유지한다.
+
+```text
+amount_krw < 1_000_000 -> final_budget 후보에서 제외
+```
+
+이 조건을 완화하면 하도급 양식, 서식 번호, 배점, 수량, `1 원`, `2 원` 같은 노이즈가 사업예산으로 승격될 위험이 크다.
+
+### 0원/미기재 처리
+
+`미기재(0원)`은 실제 예산이 0원이라는 뜻이 아니다. 문서 또는 평가셋에서 0원으로 표현되어도 corpus에서는 missing으로 해석한다.
+
+권장 저장 방식:
+
+```text
+final_budget = ""
+final_budget_krw = ""
+final_budget_status = "missing"
+budget_missing_reason = "not_disclosed_or_not_specified"
+budget_policy_note = "0원은 실제 예산이 아니라 미기재/비공개 표현으로 해석"
+```
+
+retrieval content에는 아래처럼 넣을 수 있다.
+
+```text
+사업금액/사업비/예산: 미기재 | 비공개 | 문서상 확정 예산 없음
+```
+
+단, `사업금액: 0원`처럼 실제 예산으로 오해될 표현은 넣지 않는다.
+
+### 1원/상징 기초금액 처리
+
+일부 공고는 공고문상 기초금액이 `1원`으로 걸려 있지만, 이는 실제 사업예산이 아니라 symbolic placeholder일 수 있다.
+
+이 경우 `final_budget`을 오염시키지 말고 별도 semantic field로 분리한다.
+
+권장 key:
+
+```text
+notice_base_amount = "1원"
+notice_base_amount_krw = 1
+notice_base_amount_status = "symbolic_placeholder"
+notice_base_amount_source = "manual_override | g2b_notice | notice_document"
+budget_policy_note = "공고문 기초금액은 1원이나 실제 사업예산으로 보지 않음"
+```
+
+retrieval content에는 아래처럼 넣는다.
+
+```text
+공고문 기초금액/기초금액/상징금액: 1원
+실제 사업예산: 미기재 또는 비공개
+```
+
+이렇게 하면 `공고문상 기초금액이 얼마인가` 질문에는 대응할 수 있고, 동시에 `사업예산=1원`이라는 잘못된 의미 오염을 막을 수 있다.
+
+### Manual Override는 코드 하드코딩이 아니라 데이터로 관리
+
+특정 문서명을 코드에 직접 쓰는 방식은 금지한다.
+
+금지 예시:
+
+```python
+if doc_key == "사단법인 보험개발원_실손보험 청구 전산화 시스템 구축 사업":
+    final_budget = "1원"
+```
+
+권장 방식은 사람이 검토한 override를 별도 CSV/JSONL로 관리하는 것이다.
+
+권장 파일:
+
+```text
+data/manual_overrides/budget_policy_overrides.csv
+```
+
+권장 컬럼:
+
+```text
+doc_key
+source_file
+override_type
+amount_text
+amount_krw
+amount_semantics
+target_field
+evidence
+applies_to_eval_ids
+reviewer
+reviewed_at
+note
+```
+
+예시:
+
+```text
+doc_key = 사단법인 보험개발원_실손보험 청구 전산화 시스템 구축 사업
+override_type = notice_base_amount
+amount_text = 1원
+amount_krw = 1
+amount_semantics = symbolic_placeholder
+target_field = notice_base_amount
+evidence = 공고문상 기초금액은 1원이나 제안요청서상 실제 사업예산은 포함되지 않음
+applies_to_eval_ids = Q203|Q209|Q239|Q261
+note = final_budget에는 반영하지 않음
+```
+
+override 적용 후에도 validation에서 아래를 확인한다.
+
+```text
+final_budget_krw < 1_000_000 인 row가 final_budget_status=extracted로 들어오지 않아야 함
+notice_base_amount_krw=1 은 final_budget_krw와 분리되어야 함
+manual_override_count 기록
+manual_override_target_fields 기록
+```
+
+### Eval tagging 원칙
+
+예산 질문을 하나의 category로만 평가하지 않는다.
+
+권장 category:
+
+```text
+budget_actual
+budget_missing
+budget_comparison
+budget_arithmetic
+notice_base_amount_symbolic
+```
+
+예:
+
+```text
+Q203/Q209/Q239/Q261 -> notice_base_amount_symbolic
+미기재(0원) 문항 -> budget_missing
+```
+
+일반 예산 성능을 볼 때는 `budget_actual`, `budget_comparison`, `budget_arithmetic`을 우선 보고, `notice_base_amount_symbolic`과 `budget_missing`은 별도 해석한다.
+
+### 더 정석적인 장기 구조
+
+장기적으로는 `budget`을 단일 값이 아니라 typed fact list로 저장하는 것이 가장 안전하다.
+
+예시:
+
+```json
+{
+  "facts": [
+    {
+      "fact_name": "budget",
+      "value_text": "11,270,000,000원",
+      "value_krw": 11270000000,
+      "semantics": "actual_project_budget",
+      "confidence": "high",
+      "source": "rfp_text",
+      "evidence_ref": "source_store_id"
+    },
+    {
+      "fact_name": "notice_base_amount",
+      "value_text": "1원",
+      "value_krw": 1,
+      "semantics": "symbolic_placeholder",
+      "confidence": "manual_reviewed",
+      "source": "manual_override",
+      "evidence_ref": "source_store_id or external_notice_ref"
+    }
+  ]
+}
+```
+
+typed fact 구조의 장점:
+
+```text
+1. 검색용 content와 정답 근거의 의미가 분리됨
+2. 같은 금액이라도 실제 예산, 기초금액, 추정가격, 미기재 표현을 구분 가능
+3. eval 지표에서 fact_name/semantics별 recall을 계산 가능
+4. 사람이 검토한 override와 자동 추출값을 같은 schema로 관리 가능
+5. final answer 생성 시 "실제 사업예산"과 "공고문 기초금액"을 혼동하지 않음
+```
+
+단기 구현은 `final_budget`을 유지하면서 `notice_base_amount_*`, `budget_missing_reason`, manual override CSV를 추가하는 방식으로 시작하고, 이후 typed fact list로 확장한다.
 
 ## 정규화 계획
 
@@ -581,4 +796,3 @@ source_store_id = doc_id + source_type + block_index + content_hash
 ```
 
 즉, 사람이 보기 쉬운 `ChunkID`는 보조 정보로만 두고 Chroma `ids`에는 안정적인 hash 기반 ID를 사용한다.
-
