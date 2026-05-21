@@ -169,9 +169,14 @@ def apply_chunk_index_suffix(index_dir: str, chunks: str) -> str:
         return index_dir
 
     suffix_parts = []
-    if "shared_file" in chunk_path.parts and chunk_path.parent.name:
+    parts = chunk_path.parts
+    if "shared_file" in parts and "dataset" in parts:
+        dataset_idx = parts.index("dataset")
+        suffix_parts.extend(parts[dataset_idx + 1 : -1])
+    elif "shared_file" in parts and chunk_path.parent.name:
         suffix_parts.append(chunk_path.parent.name)
     suffix_parts.append(chunk_path.stem)
+
     suffix = re.sub(r"[^a-zA-Z0-9]+", "_", "_".join(suffix_parts)).strip("_").lower()
     if not suffix:
         return index_dir
