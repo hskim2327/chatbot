@@ -7,6 +7,7 @@ import json
 import math
 import re
 import unicodedata
+from difflib import SequenceMatcher
 from typing import Any
 
 import pandas as pd
@@ -37,6 +38,47 @@ def normalize_doc_id(value: Any) -> str:
         return ""
     text = unicodedata.normalize("NFC", str(value)).strip()
     return re.sub(r"\s+", " ", text)
+
+
+def doc_match_key(value: Any) -> str:
+    """문서명 비교용 key를 만든다. 표기 흔들림은 줄이고 원문 출력은 보존한다."""
+
+    text = normalize_doc_id(value)
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", text).casefold()
+    text = text.replace("㈜", "(주)")
+    text = text.replace("주식회사", "주")
+    text = text.replace("(주)", "주")
+    text = text.replace("（주）", "주")
+    text = re.sub(r"\.(hwp|hwpx|pdf|docx?|xlsx?)$", "", text, flags=re.IGNORECASE)
+    return re.sub(r"[^0-9a-z가-힣]+", "", text)
+
+
+def same_doc_prefix(left: Any, right: Any) -> bool:
+    """기관/출처 prefix가 있는 파일명끼리는 같은 prefix일 때만 fuzzy match를 허용한다."""
+
+    left_text = normalize_doc_id(left)
+    right_text = normalize_doc_id(right)
+    if "_" not in left_text or "_" not in right_text:
+        return True
+    return doc_match_key(left_text.split("_", 1)[0]) == doc_match_key(right_text.split("_", 1)[0])
+
+
+def documents_match(expected: Any, actual: Any) -> bool:
+    """문서명이 같은지 판단한다. 정확 매칭을 우선하고, 긴 파일명의 1~2글자 표기 오류만 엄격하게 허용한다."""
+
+    expected_key = doc_match_key(expected)
+    actual_key = doc_match_key(actual)
+    if not expected_key or not actual_key:
+        return False
+    if expected_key == actual_key:
+        return True
+    if min(len(expected_key), len(actual_key)) < 30:
+        return False
+    if not same_doc_prefix(expected, actual):
+        return False
+    return SequenceMatcher(None, expected_key, actual_key).ratio() >= 0.98
 
 
 def parse_doc_list(value: Any) -> list[str]:

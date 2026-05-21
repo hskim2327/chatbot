@@ -41,6 +41,16 @@ def write_markdown_summary(path, phase1_summary: dict[str, Any], ragas_summary: 
         f"- overall_mrr_at_5: {phase1_summary.get('overall_mrr_at_5')}",
         f"- overall_ndcg_at_5: {phase1_summary.get('overall_ndcg_at_5')}",
     ]
+    if "overall_doc_recall_at_5" in phase1_summary:
+        lines.extend(
+            [
+                "",
+                "## Phase 1 분석 지표",
+                "",
+                f"- overall_doc_recall_at_5: {phase1_summary.get('overall_doc_recall_at_5')}",
+                f"- overall_multi_doc_recall_at_5: {phase1_summary.get('overall_multi_doc_recall_at_5')}",
+            ]
+        )
     if ragas_summary is not None:
         lines.extend(["", "## Phase 2 RAGAS", ""])
         for key, value in ragas_summary.items():

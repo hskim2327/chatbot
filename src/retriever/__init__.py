@@ -7,6 +7,11 @@ __all__ = [
     "MultiQueryRetriever",
     "OpenAIQueryExpander",
     "RerankRetriever",
+    "CrossEncoderReranker",
+    "DocumentDiversityRetriever",
+    "DocumentScoreRetriever",
+    "LocalQueryDecomposer",
+    "QueryDecompositionRetriever",
     "ContextualCompressionRetriever",
     "KeywordContextCompressor",
 ]
@@ -33,6 +38,26 @@ def __getattr__(name: str):
         from .rerank import RerankRetriever
 
         return RerankRetriever
+    if name == "CrossEncoderReranker":
+        from .rerank import CrossEncoderReranker
+
+        return CrossEncoderReranker
+    if name == "DocumentDiversityRetriever":
+        from .diversity import DocumentDiversityRetriever
+
+        return DocumentDiversityRetriever
+    if name == "DocumentScoreRetriever":
+        from .document_score import DocumentScoreRetriever
+
+        return DocumentScoreRetriever
+    if name == "LocalQueryDecomposer":
+        from .query_decomposition import LocalQueryDecomposer
+
+        return LocalQueryDecomposer
+    if name == "QueryDecompositionRetriever":
+        from .query_decomposition import QueryDecompositionRetriever
+
+        return QueryDecompositionRetriever
     if name == "ContextualCompressionRetriever":
         from .compression import ContextualCompressionRetriever
 

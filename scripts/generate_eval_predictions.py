@@ -74,14 +74,35 @@ def main() -> None:
     parser.add_argument("--hybrid-fetch-k", type=int, default=50)
     parser.add_argument("--hybrid-bm25-weight", type=float, default=0.5)
     parser.add_argument("--hybrid-dense-weight", type=float, default=0.5)
+    parser.add_argument("--bm25-tokenizer", choices=["regex", "whitespace"], default="regex")
     parser.add_argument("--build-index", action="store_true", help="Build or rebuild a vector index before generating predictions.")
     parser.add_argument("--embedding-batch-size", type=int, default=100)
 
     parser.add_argument("--multi-query", action="store_true")
     parser.add_argument("--multi-query-count", type=int, default=3)
     parser.add_argument("--multi-query-fetch-k", type=int, default=20)
+    parser.add_argument("--query-decomposition", action="store_true")
+    parser.add_argument("--decomposition-candidates-per-query", type=int, default=20)
+    parser.add_argument("--decomposition-max-queries", type=int, default=8)
+    parser.add_argument("--decomposition-selection", choices=["round_robin", "rrf"], default="round_robin")
+    parser.add_argument("--decomposition-ignore-metadata-filter", action="store_true")
+    parser.add_argument("--no-decomposition-include-original", action="store_false", dest="decomposition_include_original")
     parser.add_argument("--rerank", action="store_true")
     parser.add_argument("--rerank-candidates", type=int, default=30)
+    parser.add_argument("--reranker", choices=["keyword", "cross-encoder"], default="keyword")
+    parser.add_argument("--rerank-after-diversity", action="store_true")
+    parser.add_argument("--rerank-original-score-weight", type=float, default=0.01)
+    parser.add_argument("--cross-encoder-model", default="BAAI/bge-reranker-v2-m3")
+    parser.add_argument("--cross-encoder-batch-size", type=int, default=32)
+    parser.add_argument("--cross-encoder-max-chars", type=int, default=1200)
+    parser.add_argument("--document-diversity", action="store_true", help="Select final contexts from diverse documents.")
+    parser.add_argument("--diversity-candidates", type=int, default=50)
+    parser.add_argument("--diversity-key", choices=["doc_id", "source_file"], default="doc_id")
+    parser.add_argument("--document-scoring", action="store_true", help="Aggregate chunk candidates into document-level scores.")
+    parser.add_argument("--doc-score-candidates", type=int, default=100)
+    parser.add_argument("--doc-score-method", choices=["max", "mean_top_n", "sum_top_n"], default="mean_top_n")
+    parser.add_argument("--doc-score-top-n", type=int, default=3)
+    parser.add_argument("--doc-score-key", choices=["doc_id", "source_file"], default="doc_id")
     parser.add_argument("--compress-context", action="store_true")
     parser.add_argument("--compression-max-chars", type=int, default=1200)
 
@@ -119,13 +140,34 @@ def main() -> None:
         hybrid_fetch_k=args.hybrid_fetch_k,
         hybrid_bm25_weight=args.hybrid_bm25_weight,
         hybrid_dense_weight=args.hybrid_dense_weight,
+        bm25_tokenizer=args.bm25_tokenizer,
         vector_store_type=args.vector_store,
         chroma_collection=args.chroma_collection,
         multi_query=args.multi_query,
         multi_query_count=args.multi_query_count,
         multi_query_fetch_k=args.multi_query_fetch_k,
+        query_decomposition=args.query_decomposition,
+        decomposition_candidates_per_query=args.decomposition_candidates_per_query,
+        decomposition_max_queries=args.decomposition_max_queries,
+        decomposition_selection=args.decomposition_selection,
+        decomposition_ignore_metadata_filter=args.decomposition_ignore_metadata_filter,
+        decomposition_include_original=args.decomposition_include_original,
         rerank=args.rerank,
         rerank_candidates=args.rerank_candidates,
+        reranker_type=args.reranker,
+        rerank_after_diversity=args.rerank_after_diversity,
+        rerank_original_score_weight=args.rerank_original_score_weight,
+        cross_encoder_model=args.cross_encoder_model,
+        cross_encoder_batch_size=args.cross_encoder_batch_size,
+        cross_encoder_max_chars=args.cross_encoder_max_chars,
+        document_diversity=args.document_diversity,
+        diversity_candidates=args.diversity_candidates,
+        diversity_key=args.diversity_key,
+        document_scoring=args.document_scoring,
+        doc_score_candidates=args.doc_score_candidates,
+        doc_score_method=args.doc_score_method,
+        doc_score_top_n=args.doc_score_top_n,
+        doc_score_key=args.doc_score_key,
         compress_context=args.compress_context,
         compression_max_chars=args.compression_max_chars,
     )
@@ -386,8 +428,28 @@ def format_context(rank: int, item: dict[str, Any], context_max_chars: int) -> d
         "dense_rank",
         "rerank_score",
         "rerank_rank",
+        "diversity_rank",
+        "diversity_rank_before",
+        "diversity_group_key",
+        "doc_score",
+        "doc_score_method",
+        "doc_score_top_n",
+        "doc_score_candidate_count",
+        "doc_score_best_chunk_score",
+        "doc_score_rank",
+        "doc_score_rank_before",
+        "doc_score_group_key",
         "compression_ratio",
         "matched_queries",
+        "decomposition_score",
+        "decomposition_best_chunk_score",
+        "decomposition_query",
+        "decomposition_query_index",
+        "decomposition_query_rank",
+        "decomposition_query_count",
+        "decomposition_rank",
+        "decomposition_doc_key",
+        "decomposition_matched_query_count",
     ):
         if key in item:
             context[key] = item.get(key)
@@ -404,12 +466,31 @@ def build_retriever_config(args: argparse.Namespace) -> dict[str, Any]:
         "embedding_provider": args.embedding_provider,
         "embedding_model": args.embedding_model,
         "reranker": bool(args.rerank),
+        "reranker_type": args.reranker if args.rerank else "",
+        "rerank_after_diversity": bool(args.rerank_after_diversity) if args.rerank else "",
+        "rerank_original_score_weight": args.rerank_original_score_weight if args.rerank and args.reranker == "keyword" else "",
+        "cross_encoder_model": args.cross_encoder_model if args.rerank and args.reranker == "cross-encoder" else "",
+        "document_diversity": bool(args.document_diversity),
+        "diversity_candidates": args.diversity_candidates if args.document_diversity else "",
+        "diversity_key": args.diversity_key if args.document_diversity else "",
+        "document_scoring": bool(args.document_scoring),
+        "doc_score_candidates": args.doc_score_candidates if args.document_scoring else "",
+        "doc_score_method": args.doc_score_method if args.document_scoring else "",
+        "doc_score_top_n": args.doc_score_top_n if args.document_scoring else "",
+        "doc_score_key": args.doc_score_key if args.document_scoring else "",
         "multi_query": bool(args.multi_query),
+        "query_decomposition": bool(args.query_decomposition),
+        "decomposition_candidates_per_query": args.decomposition_candidates_per_query if args.query_decomposition else "",
+        "decomposition_max_queries": args.decomposition_max_queries if args.query_decomposition else "",
+        "decomposition_selection": args.decomposition_selection if args.query_decomposition else "",
+        "decomposition_ignore_metadata_filter": bool(args.decomposition_ignore_metadata_filter) if args.query_decomposition else "",
+        "decomposition_include_original": bool(args.decomposition_include_original) if args.query_decomposition else "",
         "compress_context": bool(args.compress_context),
         "expand_multi_agency_filter": bool(args.expand_multi_agency_filter),
         "hybrid_fetch_k": args.hybrid_fetch_k if args.retriever == "hybrid" else "",
         "hybrid_bm25_weight": args.hybrid_bm25_weight if args.retriever == "hybrid" else "",
         "hybrid_dense_weight": args.hybrid_dense_weight if args.retriever == "hybrid" else "",
+        "bm25_tokenizer": args.bm25_tokenizer if args.retriever in {"bm25", "hybrid"} else "",
         "chunk_size": "pre_chunked",
         "chunk_overlap": "pre_chunked",
     }
@@ -434,6 +515,13 @@ def resolve_output_path(args: argparse.Namespace) -> Path:
         return Path(args.output)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     parts = [args.retriever, args.embedding_preset]
+    print(f"query_decomposition: {args.query_decomposition}")
+    if args.query_decomposition:
+        print(f"decomposition_candidates_per_query: {args.decomposition_candidates_per_query}")
+        print(f"decomposition_max_queries: {args.decomposition_max_queries}")
+        print(f"decomposition_selection: {args.decomposition_selection}")
+        print(f"decomposition_ignore_metadata_filter: {args.decomposition_ignore_metadata_filter}")
+        print(f"decomposition_include_original: {args.decomposition_include_original}")
     if args.rerank:
         parts.append("rerank")
     if args.multi_query:
@@ -456,6 +544,34 @@ def print_config(args: argparse.Namespace, row_count: int, output_path: Path) ->
     print(f"embedding_provider: {args.embedding_provider}")
     print(f"embedding_model: {args.embedding_model}")
     print(f"expand_multi_agency_filter: {args.expand_multi_agency_filter}")
+    if args.retriever in {"bm25", "hybrid"}:
+        print(f"bm25_tokenizer: {args.bm25_tokenizer}")
+    print(f"query_decomposition: {args.query_decomposition}")
+    if args.query_decomposition:
+        print(f"decomposition_candidates_per_query: {args.decomposition_candidates_per_query}")
+        print(f"decomposition_max_queries: {args.decomposition_max_queries}")
+        print(f"decomposition_selection: {args.decomposition_selection}")
+        print(f"decomposition_ignore_metadata_filter: {args.decomposition_ignore_metadata_filter}")
+        print(f"decomposition_include_original: {args.decomposition_include_original}")
+    if args.rerank:
+        print(f"reranker: {args.reranker}")
+        print(f"rerank_after_diversity: {args.rerank_after_diversity}")
+        if args.reranker == "keyword":
+            print(f"rerank_original_score_weight: {args.rerank_original_score_weight}")
+        else:
+            print(f"cross_encoder_model: {args.cross_encoder_model}")
+            print(f"cross_encoder_batch_size: {args.cross_encoder_batch_size}")
+            print(f"cross_encoder_max_chars: {args.cross_encoder_max_chars}")
+    print(f"document_scoring: {args.document_scoring}")
+    if args.document_scoring:
+        print(f"doc_score_candidates: {args.doc_score_candidates}")
+        print(f"doc_score_method: {args.doc_score_method}")
+        print(f"doc_score_top_n: {args.doc_score_top_n}")
+        print(f"doc_score_key: {args.doc_score_key}")
+    print(f"document_diversity: {args.document_diversity}")
+    if args.document_diversity:
+        print(f"diversity_candidates: {args.diversity_candidates}")
+        print(f"diversity_key: {args.diversity_key}")
     print(f"generate_answer: {args.generate_answer}")
 
 
