@@ -11,6 +11,10 @@ _SPLIT_BEFORE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]+")
+_LIST_ITEM_SIGNAL_PATTERN = re.compile(
+    r"(\d+(?:\.\d+)?\s*억|[A-Z]{2,}|KOICA|코이카|한국|국립|서울|부산|인천|대구|광주|대전|울산|경기|강원|충청|전라|경상|제주|공사|공단|재단|진흥원|연구원|대학교|병원|협회|센터|조달|시스템|플랫폼|망)",
+    re.IGNORECASE,
+)
 _NOISE_PREFIX = re.compile(r"^[\s\-•*0-9.)①-⑳]+")
 
 
@@ -44,7 +48,7 @@ class LocalQueryDecomposer:
         items: list[str] = []
         for part in raw_parts:
             cleaned = _clean_subquery(part)
-            if _looks_like_subquery(cleaned):
+            if _looks_like_subquery(cleaned) and _has_list_item_signal(cleaned):
                 items.append(cleaned)
 
         if len(items) <= 1:
@@ -62,6 +66,8 @@ class QueryDecompositionRetriever:
         per_query_k: int = 20,
         selection: SelectionStrategy = "round_robin",
         ignore_metadata_filter: bool = False,
+        conditional: bool = False,
+        min_subqueries: int = 2,
         rrf_k: int = 60,
     ):
         self.base_retriever = base_retriever
@@ -69,6 +75,8 @@ class QueryDecompositionRetriever:
         self.per_query_k = per_query_k
         self.selection = selection
         self.ignore_metadata_filter = ignore_metadata_filter
+        self.conditional = conditional
+        self.min_subqueries = min_subqueries
         self.rrf_k = rrf_k
 
     def retrieve(
@@ -78,6 +86,10 @@ class QueryDecompositionRetriever:
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         queries = self.decomposer.expand(query)
+        subquery_count = _subquery_count(query, queries)
+        if self.conditional and subquery_count < self.min_subqueries:
+            return self._retrieve_without_decomposition(query, top_k, metadata_filter, subquery_count)
+
         active_filter = None if self.ignore_metadata_filter else metadata_filter
         per_query_results: list[list[dict[str, Any]]] = []
         doc_items: dict[str, dict[str, Any]] = {}
@@ -138,7 +150,29 @@ class QueryDecompositionRetriever:
             item["score"] = float(item.get("decomposition_score") or item.get("score") or 0.0)
             item["decomposition_rank"] = rank
             item["decomposition_query_count"] = len(queries)
+            item["decomposition_subquery_count"] = subquery_count
+            item["decomposition_applied"] = True
+            item["decomposition_reason"] = "subquery_count>=min_subqueries"
         return ranked[:top_k]
+
+    def _retrieve_without_decomposition(
+        self,
+        query: str,
+        top_k: int,
+        metadata_filter: dict[str, Any] | None,
+        subquery_count: int,
+    ) -> list[dict[str, Any]]:
+        results = self.base_retriever.retrieve(query, top_k=top_k, metadata_filter=metadata_filter)
+        annotated: list[dict[str, Any]] = []
+        for rank, result in enumerate(results, 1):
+            item = result.copy()
+            item["decomposition_rank"] = rank
+            item["decomposition_query_count"] = 1
+            item["decomposition_subquery_count"] = subquery_count
+            item["decomposition_applied"] = False
+            item["decomposition_reason"] = "subquery_count<min_subqueries"
+            annotated.append(item)
+        return annotated
 
     def _round_robin(
         self,
@@ -181,6 +215,17 @@ def _looks_like_subquery(text: str) -> bool:
     if len(tokens) < 2:
         return False
     return any(re.search(r"[가-힣]", token) for token in tokens)
+
+
+def _has_list_item_signal(text: str) -> bool:
+    return bool(_LIST_ITEM_SIGNAL_PATTERN.search(text or ""))
+
+
+
+def _subquery_count(original_query: str, queries: list[str]) -> int:
+    original = str(original_query or "").strip()
+    return sum(1 for query in queries if str(query or "").strip() and str(query or "").strip() != original)
+
 
 
 def _document_key(item: dict[str, Any]) -> str:

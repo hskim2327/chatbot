@@ -43,6 +43,8 @@ class RAGPipeline:
         decomposition_selection: str = "round_robin",
         decomposition_ignore_metadata_filter: bool = False,
         decomposition_include_original: bool = True,
+        decomposition_conditional: bool = False,
+        decomposition_min_subqueries: int = 2,
         rerank: bool = False,
         rerank_candidates: int = 30,
         reranker_type: str = "keyword",
@@ -97,6 +99,8 @@ class RAGPipeline:
         self.decomposition_selection = decomposition_selection
         self.decomposition_ignore_metadata_filter = decomposition_ignore_metadata_filter
         self.decomposition_include_original = decomposition_include_original
+        self.decomposition_conditional = decomposition_conditional
+        self.decomposition_min_subqueries = decomposition_min_subqueries
         self.rerank = rerank
         self.rerank_candidates = rerank_candidates
         self.reranker_type = reranker_type
@@ -240,6 +244,8 @@ class RAGPipeline:
                 per_query_k=self.decomposition_candidates_per_query,
                 selection=self.decomposition_selection,
                 ignore_metadata_filter=self.decomposition_ignore_metadata_filter,
+                conditional=self.decomposition_conditional,
+                min_subqueries=self.decomposition_min_subqueries,
             )
 
         if self.rerank and not self.rerank_after_diversity:

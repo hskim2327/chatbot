@@ -87,6 +87,8 @@ def main() -> None:
     parser.add_argument("--decomposition-selection", choices=["round_robin", "rrf"], default="round_robin")
     parser.add_argument("--decomposition-ignore-metadata-filter", action="store_true")
     parser.add_argument("--no-decomposition-include-original", action="store_false", dest="decomposition_include_original")
+    parser.add_argument("--decomposition-conditional", action="store_true", help="Only decompose queries when enough sub-queries are detected.")
+    parser.add_argument("--decomposition-min-subqueries", type=int, default=2)
     parser.add_argument("--rerank", action="store_true")
     parser.add_argument("--rerank-candidates", type=int, default=30)
     parser.add_argument("--reranker", choices=["keyword", "cross-encoder"], default="keyword")
@@ -152,6 +154,8 @@ def main() -> None:
         decomposition_selection=args.decomposition_selection,
         decomposition_ignore_metadata_filter=args.decomposition_ignore_metadata_filter,
         decomposition_include_original=args.decomposition_include_original,
+        decomposition_conditional=args.decomposition_conditional,
+        decomposition_min_subqueries=args.decomposition_min_subqueries,
         rerank=args.rerank,
         rerank_candidates=args.rerank_candidates,
         reranker_type=args.reranker,
@@ -450,6 +454,9 @@ def format_context(rank: int, item: dict[str, Any], context_max_chars: int) -> d
         "decomposition_rank",
         "decomposition_doc_key",
         "decomposition_matched_query_count",
+        "decomposition_subquery_count",
+        "decomposition_applied",
+        "decomposition_reason",
     ):
         if key in item:
             context[key] = item.get(key)
@@ -485,6 +492,8 @@ def build_retriever_config(args: argparse.Namespace) -> dict[str, Any]:
         "decomposition_selection": args.decomposition_selection if args.query_decomposition else "",
         "decomposition_ignore_metadata_filter": bool(args.decomposition_ignore_metadata_filter) if args.query_decomposition else "",
         "decomposition_include_original": bool(args.decomposition_include_original) if args.query_decomposition else "",
+        "decomposition_conditional": bool(args.decomposition_conditional) if args.query_decomposition else "",
+        "decomposition_min_subqueries": args.decomposition_min_subqueries if args.query_decomposition and args.decomposition_conditional else "",
         "compress_context": bool(args.compress_context),
         "expand_multi_agency_filter": bool(args.expand_multi_agency_filter),
         "hybrid_fetch_k": args.hybrid_fetch_k if args.retriever == "hybrid" else "",
@@ -522,6 +531,8 @@ def resolve_output_path(args: argparse.Namespace) -> Path:
         print(f"decomposition_selection: {args.decomposition_selection}")
         print(f"decomposition_ignore_metadata_filter: {args.decomposition_ignore_metadata_filter}")
         print(f"decomposition_include_original: {args.decomposition_include_original}")
+        print(f"decomposition_conditional: {args.decomposition_conditional}")
+        print(f"decomposition_min_subqueries: {args.decomposition_min_subqueries}")
     if args.rerank:
         parts.append("rerank")
     if args.multi_query:
@@ -553,6 +564,8 @@ def print_config(args: argparse.Namespace, row_count: int, output_path: Path) ->
         print(f"decomposition_selection: {args.decomposition_selection}")
         print(f"decomposition_ignore_metadata_filter: {args.decomposition_ignore_metadata_filter}")
         print(f"decomposition_include_original: {args.decomposition_include_original}")
+        print(f"decomposition_conditional: {args.decomposition_conditional}")
+        print(f"decomposition_min_subqueries: {args.decomposition_min_subqueries}")
     if args.rerank:
         print(f"reranker: {args.reranker}")
         print(f"rerank_after_diversity: {args.rerank_after_diversity}")
