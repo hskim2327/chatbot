@@ -11,22 +11,39 @@ def load_chunks_jsonl(path: str) -> list[dict[str, Any]]:
     chunks = []
 
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            item = json.loads(line)
-            chunk = normalize_chunk(item)
-            if chunk is SKIP_CHUNK:
-                continue
-            chunks.append(chunk)
+        first_char = f.read(1)
+        f.seek(0)
+        if first_char == "[":
+            items = json.load(f)
+        else:
+            items = [json.loads(line) for line in f if line.strip()]
+
+    for item in items:
+        chunk = normalize_chunk(item)
+        if chunk is SKIP_CHUNK:
+            continue
+        chunks.append(chunk)
 
     return chunks
 
 
 def normalize_chunk(item: dict[str, Any]) -> dict[str, Any] | object:
+    if is_normalized_chunk(item):
+        return item
     if "ChunkContent" in item:
         return normalize_rag_database_chunk(item)
     if is_shared_p4_chunk(item) and should_skip_shared_p4_chunk(item):
         return SKIP_CHUNK
     return normalize_chunks_v2_chunk(item)
+
+
+def is_normalized_chunk(item: dict[str, Any]) -> bool:
+    return (
+        "chunk_id" in item
+        and "doc_id" in item
+        and "text" in item
+        and isinstance(item.get("metadata"), dict)
+    )
 
 
 def is_shared_p4_chunk(item: dict[str, Any]) -> bool:

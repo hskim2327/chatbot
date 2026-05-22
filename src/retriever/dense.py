@@ -55,11 +55,33 @@ class DenseRetriever:
             candidates = self.vector_store.search(query_embedding, top_k=top_k)
             return self._annotate_dense_results(candidates)
 
+        if getattr(self.vector_store, "supports_metadata_filter", False):
+            candidates = self.vector_store.search(
+                query_embedding,
+                top_k=max(fetch_k or top_k, top_k),
+                metadata_filter=metadata_filter,
+            )
+            filtered = [item for item in candidates if matches_metadata(item, metadata_filter)]
+            if filtered:
+                return self._annotate_dense_results(filtered[:top_k])
+
+        return self._retrieve_with_python_filter(
+            query_embedding=query_embedding,
+            top_k=top_k,
+            metadata_filter=metadata_filter,
+            fetch_k=fetch_k,
+        )
+
+    def _retrieve_with_python_filter(
+        self,
+        query_embedding: Any,
+        top_k: int,
+        metadata_filter: dict[str, Any],
+        fetch_k: int | None = None,
+    ) -> List[dict[str, Any]]:
         results: List[dict[str, Any]] = []
         search_k = max(fetch_k or top_k * 10, top_k)
         max_k = self._count_vectors() or search_k
-        if self.vector_store.__class__.__name__ == "ChromaVectorStore":
-            max_k = min(max_k, max(search_k, 25))
 
         while search_k <= max_k:
             candidates = self.vector_store.search(query_embedding, top_k=search_k)
