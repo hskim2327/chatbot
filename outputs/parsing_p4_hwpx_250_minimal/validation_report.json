@@ -1,0 +1,54 @@
+{
+  "corpus_name": "p4_hwpx_250_eval_covered_minimal",
+  "source": "filtered_from_p4_hwpx_690",
+  "selection_rule": "all available eval ground-truth docs first, then rank-order filler docs until 250 documents",
+  "document_count": 250,
+  "metadata_rows": 250,
+  "official_eval_files_batch01_25": 25,
+  "official_eval_question_count_batch01_25": 500,
+  "official_eval_gt_unique_docs_batch01_25": 41,
+  "official_eval_gt_docs_matched_batch01_25": 40,
+  "official_eval_gt_docs_in_selected_corpus_batch01_25": 40,
+  "official_eval_fuzzy_matches": [
+    {
+      "gt_doc": "인천공항운영서비스(주)_인천공항운서비스㈜ 차세대 ERP시스템 구축 .hwp",
+      "matched_source_file": "인천공항운영서비스(주)_인천공항운영서비스㈜ 차세대 ERP시스템 구축 .hwp",
+      "score": 0.9836
+    }
+  ],
+  "official_eval_missing_gt_docs": [],
+  "all_eval_files_found": 38,
+  "all_eval_question_count": 1100,
+  "all_eval_gt_unique_docs": 62,
+  "all_eval_gt_docs_matched_to_corpus": 61,
+  "all_eval_gt_docs_in_selected_corpus": 61,
+  "all_eval_fuzzy_matches": [
+    {
+      "gt_doc": "인천공항운영서비스(주)_인천공항운서비스㈜ 차세대 ERP시스템 구축 .hwp",
+      "matched_source_file": "인천공항운영서비스(주)_인천공항운영서비스㈜ 차세대 ERP시스템 구축 .hwp",
+      "score": 0.9836
+    }
+  ],
+  "missing_gt_docs": [],
+  "chunk_count": 41574,
+  "embed_enabled_count": 41468,
+  "chunk_type_counts": {
+    "toc": 104,
+    "text": 11188,
+    "fact_candidates": 250,
+    "table": 30032
+  },
+  "duplicate_doc_id_count": 0,
+  "duplicate_chunk_id_count": 0,
+  "missing_content_count": 0,
+  "missing_source_ref_count": 0,
+  "avg_content_len": 525.76,
+  "p50_content_len": 400,
+  "p95_content_len": 991,
+  "max_content_len": 1000,
+  "chunks_jsonl_file_size_mib": 88.15,
+  "metadata_xlsx_file_size_mib": 0.86,
+  "notice_id_nonempty": 131,
+  "bid_deadline_nonempty": 117,
+  "status": "PASS"
+}

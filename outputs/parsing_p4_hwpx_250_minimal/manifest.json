@@ -1,0 +1,14 @@
+{
+  "corpus_name": "p4_hwpx_250_eval_covered_minimal",
+  "corpus_version": "v2_hwpx_table_aware_eval_covered_minimal",
+  "source_corpus": "p4_hwpx_690",
+  "document_count": 250,
+  "official_eval_gt_docs_batch01_25_included": 40,
+  "all_eval_gt_docs_included": 61,
+  "chunks_file": "chunks_v2_250.jsonl",
+  "metadata_light_file": "metadata_light_250.xlsx",
+  "validation_report_file": "validation_report.json",
+  "source_store_included": false,
+  "chroma_db_included": false,
+  "embedding_cache_included": false
+}
