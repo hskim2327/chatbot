@@ -1,0 +1,16 @@
+{
+  "corpus_name": "p4_hwpx_690",
+  "corpus_version": "v2_hwpx_table_aware",
+  "baseline_version": "v1_clean_text",
+  "document_count": 690,
+  "sample_source": "outputs/parsing_p3_690/metadata_light_690.xlsx",
+  "chunks_v1_file": "chunks_v1_690.jsonl",
+  "chunks_v2_file": "chunks_v2_690.jsonl",
+  "source_store_v1_file": "source_store_v1_690.jsonl",
+  "source_store_v2_file": "source_store_690.jsonl",
+  "metadata_light_file": "metadata_light_690.xlsx",
+  "chunk_max_chars": 1000,
+  "chunk_overlap": 150,
+  "hwpx_parsing_used": true,
+  "created_at": "2026-05-19 19:40:47"
+}

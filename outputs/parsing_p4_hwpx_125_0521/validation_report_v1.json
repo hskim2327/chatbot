@@ -1,0 +1,59 @@
+{
+  "output_dir": "/Users/apple/Desktop/codeit/project_2nd/chatbot/outputs/parsing_p4_hwpx_125_0521",
+  "version": "v1",
+  "document_count": 125,
+  "parse_success_docs": 125,
+  "parse_failed_docs": 0,
+  "source_format_counts": {
+    "hwpx": 113,
+    "pdf": 12
+  },
+  "total_table_count": 13585,
+  "total_image_count": 609,
+  "chunk_count": 13590,
+  "source_store_count": 4977,
+  "duplicate_doc_id_count": 0,
+  "duplicate_chunk_id_count": 0,
+  "duplicate_source_store_id_count": 0,
+  "missing_source_store_ref": 0,
+  "missing_doc_key_count": 0,
+  "embed_enabled_count": 13534,
+  "chunk_type_counts": {
+    "toc": 56,
+    "text": 13534
+  },
+  "avg_content_len": 762.41,
+  "p50_content_len": 939,
+  "p95_content_len": 997,
+  "max_content_len": 1000,
+  "chunks_jsonl_file_size_mib": 38.14,
+  "source_store_file_size_mib": 32.07,
+  "chunks_jsonl_line_count": 13590,
+  "source_store_jsonl_line_count": 4977,
+  "chunks_jsonl_sha1": "d05e602a758cb7954f8083d48a1941742cb39698",
+  "source_store_jsonl_sha1": "7d1528463400d7b979aeb29b3b386a1b4daaac37",
+  "date_policy": "bid_deadline_only; posted date and bid-start date are not used",
+  "created_at": "2026-05-21 15:31:08",
+  "eval_physical_source_docs_included": 40,
+  "expected_eval_physical_source_docs": 40,
+  "additional_sampled_docs": 85,
+  "g2b_match_status_counts": {
+    "no_confident_match": 56,
+    "matched_active": 48,
+    "ambiguous_active": 21
+  },
+  "g2b_active_match_count": 48,
+  "g2b_bid_deadline_count": 37,
+  "g2b_cancelled_only_count": 0,
+  "g2b_ambiguous_active_count": 21,
+  "small_final_budget_extracted_count": 0,
+  "budget_missing_reason_counts": {
+    "": 121,
+    "not_disclosed_or_not_specified": 4
+  },
+  "docs_with_budget_missing_reason": 4,
+  "docs_with_notice_base_amount": 2,
+  "manual_budget_override_count": 1,
+  "status": "PASS",
+  "fail_reasons": []
+}

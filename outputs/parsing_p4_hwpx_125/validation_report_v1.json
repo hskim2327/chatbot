@@ -1,0 +1,47 @@
+{
+  "output_dir": "/Users/apple/Desktop/codeit/project_2nd/chatbot/outputs/parsing_p4_hwpx_125",
+  "version": "v1",
+  "document_count": 125,
+  "parse_success_docs": 125,
+  "parse_failed_docs": 0,
+  "source_format_counts": {
+    "hwpx": 113,
+    "pdf": 12
+  },
+  "total_table_count": 13585,
+  "total_image_count": 609,
+  "chunk_count": 13590,
+  "source_store_count": 4977,
+  "duplicate_doc_id_count": 0,
+  "duplicate_chunk_id_count": 0,
+  "duplicate_source_store_id_count": 0,
+  "missing_source_store_ref": 0,
+  "missing_doc_key_count": 0,
+  "embed_enabled_count": 13534,
+  "chunk_type_counts": {
+    "toc": 56,
+    "text": 13534
+  },
+  "avg_content_len": 762.41,
+  "p50_content_len": 939,
+  "p95_content_len": 997,
+  "max_content_len": 1000,
+  "chunks_jsonl_file_size_mib": 38.14,
+  "source_store_file_size_mib": 25.68,
+  "date_policy": "bid_deadline_only; posted date and bid-start date are not used",
+  "created_at": "2026-05-21 11:07:26",
+  "eval_physical_source_docs_included": 40,
+  "expected_eval_physical_source_docs": 40,
+  "additional_sampled_docs": 85,
+  "g2b_match_status_counts": {
+    "no_confident_match": 56,
+    "matched_active": 48,
+    "ambiguous_active": 21
+  },
+  "g2b_active_match_count": 48,
+  "g2b_bid_deadline_count": 37,
+  "g2b_cancelled_only_count": 0,
+  "g2b_ambiguous_active_count": 21,
+  "status": "PASS",
+  "fail_reasons": []
+}
