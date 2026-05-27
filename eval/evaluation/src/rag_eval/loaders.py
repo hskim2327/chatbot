@@ -36,6 +36,20 @@ def load_eval_csvs(eval_dir: Path, canonical_only: bool = True) -> pd.DataFrame:
     if missing_columns:
         raise ValueError(f"Eval CSV is missing required columns: {missing_columns}")
 
+    duplicated_ids = eval_df[eval_df["id"].duplicated(keep=False)][["id", "source_eval_file"]]
+    if not duplicated_ids.empty:
+        duplicate_sample = (
+            duplicated_ids.groupby("id")["source_eval_file"]
+            .apply(lambda values: sorted(set(values))[:5])
+            .head(10)
+            .to_dict()
+        )
+        raise ValueError(
+            "Eval CSV contains duplicated question ids across files. "
+            f"Sample: {duplicate_sample}. "
+            "Use --canonical-only for eval_batch_01~25 or move non-canonical files out of the eval directory."
+        )
+
     eval_df["ground_truth_doc_list"] = eval_df["ground_truth_docs"].apply(parse_doc_list)
     eval_df["metadata_filter_obj"] = eval_df["metadata_filter"].apply(lambda value: parse_structured_cell(value, {}))
     eval_df["history_obj"] = eval_df["history"].apply(lambda value: parse_structured_cell(value, []))

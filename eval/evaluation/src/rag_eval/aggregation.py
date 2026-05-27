@@ -48,9 +48,9 @@ def build_failure_cases(phase1_df: pd.DataFrame, ragas_df: pd.DataFrame | None =
     """Phase 1과 RAGAS 결과를 바탕으로 실패 사례를 모은다."""
 
     failure_df = phase1_df[
-        phase1_df["hit_at_5"].fillna(0).eq(0)
+        phase1_df["hit_at_5"].fillna(0).lt(1)
         | phase1_df["mrr_at_5"].fillna(0).eq(0)
-        | phase1_df["ndcg_at_5"].fillna(0).eq(0)
+        | phase1_df["ndcg_at_5"].fillna(0).lt(1)
     ].copy()
     failure_df["failure_reason"] = "retrieval_failure"
 

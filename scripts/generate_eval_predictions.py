@@ -105,6 +105,12 @@ def main() -> None:
     parser.add_argument("--doc-score-method", choices=["max", "mean_top_n", "sum_top_n"], default="mean_top_n")
     parser.add_argument("--doc-score-top-n", type=int, default=3)
     parser.add_argument("--doc-score-key", choices=["doc_id", "source_file"], default="doc_id")
+    parser.add_argument("--target-aware", action="store_true", help="Use target-aware selection for multi-document questions.")
+    parser.add_argument("--target-candidates", type=int, default=20)
+    parser.add_argument("--target-quota", type=int, default=1)
+    parser.add_argument("--target-min-count", type=int, default=2)
+    parser.add_argument("--target-max-count", type=int, default=5)
+    parser.add_argument("--target-base-preserve", type=int, default=0, help="Keep the first N base results before target-aware filling.")
     parser.add_argument("--compress-context", action="store_true")
     parser.add_argument("--compression-max-chars", type=int, default=1200)
 
@@ -172,6 +178,12 @@ def main() -> None:
         doc_score_method=args.doc_score_method,
         doc_score_top_n=args.doc_score_top_n,
         doc_score_key=args.doc_score_key,
+        target_aware=args.target_aware,
+        target_candidates=args.target_candidates,
+        target_quota=args.target_quota,
+        target_min_count=args.target_min_count,
+        target_max_count=args.target_max_count,
+        target_base_preserve=args.target_base_preserve,
         compress_context=args.compress_context,
         compression_max_chars=args.compression_max_chars,
     )
@@ -457,6 +469,18 @@ def format_context(rank: int, item: dict[str, Any], context_max_chars: int) -> d
         "decomposition_subquery_count",
         "decomposition_applied",
         "decomposition_reason",
+        "target_aware_score",
+        "target_best_score",
+        "target_aware_rank",
+        "target_aware_applied",
+        "target_query",
+        "target_query_index",
+        "target_query_rank",
+        "target_doc_key",
+        "target_query_count",
+        "target_queries",
+        "matched_target_queries",
+        "target_matched_count",
     ):
         if key in item:
             context[key] = item.get(key)
@@ -485,6 +509,12 @@ def build_retriever_config(args: argparse.Namespace) -> dict[str, Any]:
         "doc_score_method": args.doc_score_method if args.document_scoring else "",
         "doc_score_top_n": args.doc_score_top_n if args.document_scoring else "",
         "doc_score_key": args.doc_score_key if args.document_scoring else "",
+        "target_aware": bool(args.target_aware),
+        "target_candidates": args.target_candidates if args.target_aware else "",
+        "target_quota": args.target_quota if args.target_aware else "",
+        "target_min_count": args.target_min_count if args.target_aware else "",
+        "target_max_count": args.target_max_count if args.target_aware else "",
+        "target_base_preserve": args.target_base_preserve if args.target_aware else "",
         "multi_query": bool(args.multi_query),
         "query_decomposition": bool(args.query_decomposition),
         "decomposition_candidates_per_query": args.decomposition_candidates_per_query if args.query_decomposition else "",
@@ -581,6 +611,13 @@ def print_config(args: argparse.Namespace, row_count: int, output_path: Path) ->
         print(f"doc_score_method: {args.doc_score_method}")
         print(f"doc_score_top_n: {args.doc_score_top_n}")
         print(f"doc_score_key: {args.doc_score_key}")
+    print(f"target_aware: {args.target_aware}")
+    if args.target_aware:
+        print(f"target_candidates: {args.target_candidates}")
+        print(f"target_quota: {args.target_quota}")
+        print(f"target_min_count: {args.target_min_count}")
+        print(f"target_max_count: {args.target_max_count}")
+        print(f"target_base_preserve: {args.target_base_preserve}")
     print(f"document_diversity: {args.document_diversity}")
     if args.document_diversity:
         print(f"diversity_candidates: {args.diversity_candidates}")

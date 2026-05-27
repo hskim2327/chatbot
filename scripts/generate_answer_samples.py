@@ -32,10 +32,10 @@ from src.generator import HuggingFaceGenerator
 
 DEFAULT_PREDICTIONS = (
     "outputs/predictions/"
-    "74_dense_conditional_qdecomp_v2_rrf_multi_relaxed_filter_kept_per50_diverse250_"
-    "soyeon_125_kure_chroma_hnsw_tuned_canonical.jsonl"
+    "95_dense_qdecomp_rrf_per75_docscore_mean3_targetaware30_preserve3_"
+    "kure_chroma_690_canonical.jsonl"
 )
-DEFAULT_CHUNK_SIDECAR = "indexes/chroma_kure_v1_soyeon_125_260520_chunks_v2_125/chunks.json"
+DEFAULT_CHUNK_SIDECAR = "indexes/chroma_kure_v1_chunks_v2_690/chunks.json"
 DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 
 
@@ -57,6 +57,18 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--context-max-chars", type=int, default=1200)
     parser.add_argument("--snippets-per-context", type=int, default=3)
+    parser.add_argument(
+        "--max-retrieved-contexts",
+        type=int,
+        default=12,
+        help="Use the first N retrieved contexts for generation. 0 keeps all contexts.",
+    )
+    parser.add_argument(
+        "--max-context-docs",
+        type=int,
+        default=8,
+        help="Maximum unique documents to pass to generation. 0 disables the document cap.",
+    )
     parser.add_argument("--chunk-sidecar", default=DEFAULT_CHUNK_SIDECAR)
     parser.add_argument("--max-extra-contexts", type=int, default=5)
     parser.add_argument("--max-extra-per-doc", type=int, default=2)
@@ -99,6 +111,11 @@ def main() -> None:
         for index, row in enumerate(rows, 1):
             started = time.perf_counter()
             retrieved_contexts = row.get("retrieved_contexts") or []
+            retrieved_contexts = select_generation_contexts(
+                retrieved_contexts=retrieved_contexts,
+                max_contexts=args.max_retrieved_contexts,
+                max_docs=args.max_context_docs,
+            )
             retrieved_contexts = enrich_retrieved_contexts(
                 question=row["question"],
                 retrieved_contexts=retrieved_contexts,
@@ -155,12 +172,16 @@ def select_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
     rows = []
     for _, row in merged.iterrows():
         retrieved_contexts = row.get("retrieved_contexts")
+        question, question_source, question_mismatch = choose_generation_question(row)
         rows.append(
             {
                 "id": row.get("id"),
                 "type": row.get("type"),
                 "difficulty": row.get("difficulty"),
-                "question": _first_non_empty(row, "question_eval", "question", "question_pred"),
+                "question": question,
+                "eval_question": row.get("question_eval"),
+                "question_source": question_source,
+                "question_mismatch": question_mismatch,
                 "ground_truth_answer": row.get("ground_truth_answer"),
                 "ground_truth_docs": row.get("ground_truth_doc_list"),
                 "metadata_filter": row.get("metadata_filter_obj"),
@@ -168,6 +189,50 @@ def select_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def select_generation_contexts(
+    retrieved_contexts: list[dict[str, Any]],
+    max_contexts: int = 12,
+    max_docs: int = 8,
+) -> list[dict[str, Any]]:
+    if not retrieved_contexts:
+        return []
+
+    selected: list[dict[str, Any]] = []
+    seen_docs: set[str] = set()
+    for context in retrieved_contexts:
+        doc_key = _context_doc_key(context)
+        is_new_doc = bool(doc_key and doc_key not in seen_docs)
+        if max_docs and max_docs > 0 and is_new_doc and len(seen_docs) >= max_docs:
+            continue
+
+        selected.append(context)
+        if doc_key:
+            seen_docs.add(doc_key)
+
+        if max_contexts and max_contexts > 0 and len(selected) >= max_contexts:
+            break
+
+    return selected
+
+
+def _context_doc_key(context: dict[str, Any]) -> str:
+    metadata = context.get("metadata") or {}
+    value = context.get("doc_id") or metadata.get("doc_id") or context.get("filename") or metadata.get("source_file")
+    return str(value or "")
+
+
+def choose_generation_question(row: Any) -> tuple[Any, str, bool]:
+    prediction_question = _first_non_empty(row, "question_pred", "question")
+    eval_question = row.get("question_eval")
+    if prediction_question not in (None, ""):
+        return prediction_question, "prediction", _normalize_question(prediction_question) != _normalize_question(eval_question)
+    return eval_question, "eval", False
+
+
+def _normalize_question(value: Any) -> str:
+    return " ".join(str(value or "").split())
 
 
 def _first_non_empty(row: Any, *keys: str) -> Any:
@@ -191,6 +256,9 @@ def build_payload(
         "type": row.get("type"),
         "difficulty": row.get("difficulty"),
         "question": row.get("question"),
+        "eval_question": row.get("eval_question"),
+        "question_source": row.get("question_source"),
+        "question_mismatch": row.get("question_mismatch"),
         "question_type": generation_input.question_type,
         "answer": answer,
         "ground_truth_answer": row.get("ground_truth_answer"),
@@ -207,6 +275,8 @@ def build_payload(
             "max_new_tokens": args.max_new_tokens,
             "context_max_chars": args.context_max_chars,
             "snippets_per_context": args.snippets_per_context,
+            "max_retrieved_contexts": args.max_retrieved_contexts,
+            "max_context_docs": args.max_context_docs,
             "chunk_sidecar": args.chunk_sidecar,
             "context_enrichment": not args.no_context_enrichment,
             "max_extra_contexts": args.max_extra_contexts,
@@ -228,7 +298,10 @@ def render_review_header(args: argparse.Namespace, rows: list[dict[str, Any]]) -
             f"- selected_questions: {len(rows)}",
             f"- dry_run: {args.dry_run}",
             f"- context_enrichment: {not args.no_context_enrichment}",
+            "- question_source: prediction question is used when available",
             f"- chunk_sidecar: {args.chunk_sidecar}",
+            f"- max_retrieved_contexts: {args.max_retrieved_contexts}",
+            f"- max_context_docs: {args.max_context_docs}",
             "",
             "평가자는 각 케이스에 대해 검색 문제인지, generation 문제인지, 데이터 문제인지 분리해서 기록한다.",
         ]
@@ -244,10 +317,13 @@ def render_review_case(payload: dict[str, Any]) -> str:
         f"  - rank {item.get('rank')} | {item.get('filename')}: {item.get('sentence')}"
         for item in evidence[:5]
     )
+    mismatch_note = ""
+    if payload.get("question_mismatch"):
+        mismatch_note = f"\n\n> 주의: 현재 eval 질문과 prediction 질문이 다릅니다. generation은 prediction 질문 기준으로 실행했습니다.\n> eval_question: {payload.get('eval_question')}"
     return f"""## {payload.get('id')} | type {payload.get('type')} | {payload.get('question_type')}
 
 ### Question
-{payload.get('question')}
+{payload.get('question')}{mismatch_note}
 
 ### Generated Answer
 {payload.get('answer') or '(dry-run: answer not generated)'}

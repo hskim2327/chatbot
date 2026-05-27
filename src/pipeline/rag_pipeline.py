@@ -61,6 +61,12 @@ class RAGPipeline:
         doc_score_method: str = "mean_top_n",
         doc_score_top_n: int = 3,
         doc_score_key: str = "doc_id",
+        target_aware: bool = False,
+        target_candidates: int = 20,
+        target_quota: int = 1,
+        target_min_count: int = 2,
+        target_max_count: int = 5,
+        target_base_preserve: int = 0,
         compress_context: bool = False,
         compression_max_chars: int = 1200,
     ):
@@ -117,6 +123,12 @@ class RAGPipeline:
         self.doc_score_method = doc_score_method
         self.doc_score_top_n = doc_score_top_n
         self.doc_score_key = doc_score_key
+        self.target_aware = target_aware
+        self.target_candidates = target_candidates
+        self.target_quota = target_quota
+        self.target_min_count = target_min_count
+        self.target_max_count = target_max_count
+        self.target_base_preserve = target_base_preserve
         self.compress_context = compress_context
         self.compression_max_chars = compression_max_chars
         self.api_key = api_key
@@ -260,6 +272,18 @@ class RAGPipeline:
                 method=self.doc_score_method,
                 top_n=self.doc_score_top_n,
                 key=self.doc_score_key,
+            )
+
+        if self.target_aware:
+            from src.retriever import TargetAwareRetriever, TargetQueryExtractor
+
+            retriever = TargetAwareRetriever(
+                base_retriever=retriever,
+                target_extractor=TargetQueryExtractor(self.chunks, max_targets=self.target_max_count),
+                per_target_k=self.target_candidates,
+                quota_per_target=self.target_quota,
+                min_targets=self.target_min_count,
+                base_preserve_k=self.target_base_preserve,
             )
 
         if self.document_diversity:

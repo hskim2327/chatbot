@@ -10,6 +10,8 @@ __all__ = [
     "CrossEncoderReranker",
     "DocumentDiversityRetriever",
     "DocumentScoreRetriever",
+    "TargetAwareRetriever",
+    "TargetQueryExtractor",
     "LocalQueryDecomposer",
     "QueryDecompositionRetriever",
     "ContextualCompressionRetriever",
@@ -50,6 +52,14 @@ def __getattr__(name: str):
         from .document_score import DocumentScoreRetriever
 
         return DocumentScoreRetriever
+    if name == "TargetAwareRetriever":
+        from .target_aware import TargetAwareRetriever
+
+        return TargetAwareRetriever
+    if name == "TargetQueryExtractor":
+        from .target_aware import TargetQueryExtractor
+
+        return TargetQueryExtractor
     if name == "LocalQueryDecomposer":
         from .query_decomposition import LocalQueryDecomposer
 

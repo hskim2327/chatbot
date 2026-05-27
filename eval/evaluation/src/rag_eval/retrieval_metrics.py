@@ -17,7 +17,12 @@ def compute_retrieval_metrics(
     retrieved_docs: list[str],
     top_k: int = OFFICIAL_TOP_K,
 ) -> dict[str, float]:
-    """Hit@5, MRR@5, nDCG@5를 계산한다."""
+    """Hit@5, MRR@5, nDCG@5를 계산한다.
+
+    이 프로젝트의 hit_at_5는 다중 정답 문서 질문을 반영하기 위해
+    binary hit가 아니라 정답 문서 회수율로 계산한다.
+    예: 정답 문서 2개 중 1개 검색 시 hit_at_5 = 0.5.
+    """
 
     if not ground_truth_docs:
         return {"hit_at_5": math.nan, "mrr_at_5": math.nan, "ndcg_at_5": math.nan}
@@ -29,7 +34,8 @@ def compute_retrieval_metrics(
         for doc in ranked_docs
     ]
 
-    hit_at_5 = 1.0 if any(relevances) else 0.0
+    matched_keys = _matched_ground_truth_keys(ground_truth_docs, ranked_docs)
+    hit_at_5 = len(matched_keys) / len(gt_keys) if gt_keys else math.nan
     first_rank = next((idx + 1 for idx, rel in enumerate(relevances) if rel), None)
     mrr_at_5 = 1.0 / first_rank if first_rank is not None else 0.0
 
@@ -61,11 +67,7 @@ def compute_doc_recall_metrics(
         }
 
     ranked_docs = [normalize_doc_id(doc) for doc in retrieved_docs[:top_k]]
-    matched_keys: set[str] = set()
-    for gt_doc in ground_truth_docs:
-        gt_key = doc_match_key(gt_doc)
-        if gt_key and any(documents_match(gt_doc, doc) for doc in ranked_docs):
-            matched_keys.add(gt_key)
+    matched_keys = _matched_ground_truth_keys(ground_truth_docs, ranked_docs)
 
     matched_doc_count = len(matched_keys)
     doc_recall_at_5 = matched_doc_count / ground_truth_doc_count
@@ -76,6 +78,15 @@ def compute_doc_recall_metrics(
         "multi_doc_recall_at_5": doc_recall_at_5 if ground_truth_doc_count > 1 else math.nan,
         "all_docs_hit_at_5": 1.0 if matched_doc_count == ground_truth_doc_count else 0.0,
     }
+
+
+def _matched_ground_truth_keys(ground_truth_docs: list[str], ranked_docs: list[str]) -> set[str]:
+    matched_keys: set[str] = set()
+    for gt_doc in ground_truth_docs:
+        gt_key = doc_match_key(gt_doc)
+        if gt_key and any(documents_match(gt_doc, doc) for doc in ranked_docs):
+            matched_keys.add(gt_key)
+    return matched_keys
 
 
 def first_relevant_rank(ground_truth_docs: list[str], retrieved_docs: list[str]) -> float:
