@@ -61,4 +61,3 @@ def build_failure_cases(phase1_df: pd.DataFrame, ragas_df: pd.DataFrame | None =
             error_cases["failure_reason"] = "ragas_error"
             failure_df = pd.concat([failure_df, error_cases], ignore_index=True, sort=False)
     return failure_df
-

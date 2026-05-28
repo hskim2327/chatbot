@@ -1,4 +1,4 @@
-"""CLI 인자 처리와 전체 평가 실행 흐름을 담당한다."""
+"""CLI 인자 처리와 전체 평가 실행 흐름을 관리한다."""
 
 from __future__ import annotations
 
@@ -9,9 +9,11 @@ from typing import Any
 import pandas as pd
 
 from .aggregation import aggregate_phase1, build_failure_cases, summarize_ragas
-from .config import DEFAULT_EVAL_DIR, DEFAULT_OUTPUT_DIR, OFFICIAL_TOP_K
+from .config import DEFAULT_DOMAIN_GOLD_PATH, DEFAULT_EVAL_DIR, DEFAULT_OUTPUT_DIR, OFFICIAL_TOP_K
+from .domain_runner import run_domain_evaluation
 from .experiment_logger import write_experiment_logs
 from .loaders import load_eval_csvs, load_predictions_jsonl, merge_eval_predictions
+from .llm_judge_runner import run_llm_judge_evaluation
 from .path_utils import project_root, resolve_path
 from .ragas_evaluator import run_ragas_evaluation
 from .reports import write_dataframe, write_reports
@@ -26,7 +28,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--predictions", required=True, help="predictions JSONL 경로")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="평가 결과 출력 폴더")
     parser.add_argument("--canonical-only", action="store_true", help="eval_batch_01~25만 사용")
-    parser.add_argument("--top-k", type=int, default=OFFICIAL_TOP_K, help="호환성 옵션. 공식 평가는 top_k=5를 사용")
+    parser.add_argument("--top-k", type=int, default=OFFICIAL_TOP_K, help="호환용 옵션. 공식 평가는 top_k=5를 사용")
     parser.add_argument("--experiment-id", default="", help="실험 id. 없으면 자동 생성")
     parser.add_argument("--experiment-name", default="", help="실험 이름")
     parser.add_argument("--notes", default="", help="실험 메모")
@@ -35,6 +37,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ragas-sample-size", type=int, default=0, help="RAGAS 평가 샘플 수. 0이면 전체")
     parser.add_argument("--ragas-output-path", default="", help="RAGAS CSV를 별도 저장할 경로")
     parser.add_argument("--include-analysis-metrics", action="store_true", help="doc_recall_at_5 등 분석용 검색 지표를 추가 저장")
+    parser.add_argument("--enable-domain", action="store_true", help="Phase 3 RFP 도메인 평가 실행")
+    parser.add_argument("--require-domain", action="store_true", help="Phase 3 실패 시 가능한 결과 저장 후 non-zero 반환")
+    parser.add_argument("--domain-gold-path", default=DEFAULT_DOMAIN_GOLD_PATH, help="Phase 3 도메인 gold JSONL 경로")
+    parser.add_argument("--domain-output-dir", default="", help="Phase 3 결과 출력 폴더. 비우면 --output-dir 사용")
+    parser.add_argument("--domain-sample-size", type=int, default=0, help="Phase 3 평가 샘플 수. 0이면 전체")
+    parser.add_argument("--enable-llm-judge", action="store_true", help="Phase 4 LLM Judge 평가 실행")
+    parser.add_argument("--llm-judge-mode", choices=("mock", "dry_run", "api"), default="mock", help="LLM Judge 실행 모드")
+    parser.add_argument(
+        "--llm-judge-reference-mode",
+        choices=("evidence_only", "gold_guided"),
+        default="evidence_only",
+        help="LLM Judge 입력 참조 방식. 기본값은 evidence_only",
+    )
+    parser.add_argument("--llm-judge-model", default="", help="LLM Judge 모델명. API key 값은 기록하지 않음")
+    parser.add_argument("--llm-judge-sample-size", type=int, default=0, help="LLM Judge 샘플 수. 0이면 전체")
+    parser.add_argument("--llm-judge-output-dir", default="", help="LLM Judge 결과 출력 폴더. 비우면 --output-dir 사용")
+    parser.add_argument("--llm-judge-dry-run", action="store_true", help="API 호출 없이 judge input JSONL만 생성")
+    parser.add_argument("--require-llm-judge", action="store_true", help="LLM Judge 실패 시 가능한 결과 저장 후 non-zero 반환")
     return parser
 
 
@@ -77,12 +97,48 @@ def ragas_failed(ragas_metadata: dict[str, Any] | None) -> bool:
     return bool(ragas_metadata and int(ragas_metadata.get("ragas_error_count", 0)) > 0)
 
 
+def write_domain_error_summary(output_dir, error: Exception) -> None:
+    """Phase 3 실패 내용을 짧은 Markdown 파일로 남긴다."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Phase 3 RFP 도메인 평가 오류",
+        "",
+        "Phase 3 실행 중 오류가 발생했습니다. Phase 1/2 결과 저장은 이 오류와 분리됩니다.",
+        "",
+        f"- error_type: {type(error).__name__}",
+        f"- error: {error}",
+    ]
+    (output_dir / "phase3_domain_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_llm_judge_error_summary(output_dir, error: Exception) -> None:
+    """Phase 4 실패 내용을 짧은 Markdown 파일로 남긴다."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Phase 4 LLM Judge 평가 오류",
+        "",
+        "Phase 4 실행 중 오류가 발생했습니다. Phase 1/2/3 결과 저장은 이 오류와 분리됩니다.",
+        "",
+        f"- error_type: {type(error).__name__}",
+        f"- error: {error}",
+    ]
+    (output_dir / "phase4_llm_judge_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     """평가 전체 흐름을 실행하고 exit code를 반환한다."""
 
     args = build_arg_parser().parse_args(argv)
     if args.require_ragas and not args.enable_ragas:
         print("--require-ragas는 --enable-ragas와 함께 사용해야 합니다.")
+        return 2
+    if args.require_domain and not args.enable_domain:
+        print("--require-domain은 --enable-domain과 함께 사용해야 합니다.")
+        return 2
+    if args.require_llm_judge and not args.enable_llm_judge:
+        print("--require-llm-judge는 --enable-llm-judge와 함께 사용해야 합니다.")
         return 2
 
     root = project_root()
@@ -114,8 +170,6 @@ def main(argv: list[str] | None = None) -> int:
             write_dataframe(ragas_df, resolve_path(args.ragas_output_path, root))
 
     failure_df = build_failure_cases(phase1_df, ragas_df)
-
-    # strict mode에서도 결과 파일을 먼저 저장한 뒤 마지막에 exit code를 결정한다.
     write_reports(output_dir, phase1_df, phase1_summary, by_type, by_difficulty, failure_df, ragas_df, ragas_summary)
     experiment_meta = build_experiment_meta(args, predictions_path, predictions_df)
     write_experiment_logs(
@@ -129,7 +183,48 @@ def main(argv: list[str] | None = None) -> int:
         failure_df,
     )
 
+    domain_failed = False
+    if args.enable_domain:
+        domain_output_dir = resolve_path(args.domain_output_dir, root) if args.domain_output_dir else output_dir
+        domain_gold_path = resolve_path(args.domain_gold_path, root)
+        try:
+            run_domain_evaluation(
+                domain_gold_path,
+                predictions_df,
+                domain_output_dir,
+                experiment_meta=experiment_meta,
+                sample_size=args.domain_sample_size,
+            )
+        except Exception as exc:
+            domain_failed = True
+            write_domain_error_summary(domain_output_dir, exc)
+            print(f"Phase 3 domain evaluation failed: {exc}")
+
+    llm_judge_failed = False
+    if args.enable_llm_judge:
+        llm_output_dir = resolve_path(args.llm_judge_output_dir, root) if args.llm_judge_output_dir else output_dir
+        domain_gold_path = resolve_path(args.domain_gold_path, root)
+        llm_mode = "dry_run" if args.llm_judge_dry_run else args.llm_judge_mode
+        try:
+            run_llm_judge_evaluation(
+                predictions_df=predictions_df,
+                domain_gold_path=domain_gold_path,
+                output_dir=llm_output_dir,
+                experiment_meta=experiment_meta,
+                mode=llm_mode,
+                reference_mode=args.llm_judge_reference_mode,
+                model=args.llm_judge_model,
+                sample_size=args.llm_judge_sample_size,
+            )
+        except Exception as exc:
+            llm_judge_failed = True
+            write_llm_judge_error_summary(llm_output_dir, exc)
+            print(f"Phase 4 LLM Judge evaluation failed: {exc}")
+
     if args.require_ragas and ragas_failed(ragas_metadata):
         return 2
+    if args.require_domain and domain_failed:
+        return 3
+    if args.require_llm_judge and llm_judge_failed:
+        return 4
     return 0
-

@@ -7,6 +7,9 @@ __pycache__/
 .venv/
 venv/
 
+# test/cache
+.pytest_cache/
+
 # jupyter
 .ipynb_checkpoints/
 

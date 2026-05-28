@@ -65,7 +65,7 @@ def load_predictions_jsonl(predictions_path: Path) -> pd.DataFrame:
     """RAG 시스템 출력 predictions JSONL을 읽는다."""
 
     rows: list[dict[str, Any]] = []
-    with predictions_path.open("r", encoding="utf-8") as file:
+    with predictions_path.open("r", encoding="utf-8-sig") as file:
         for line_number, line in enumerate(file, start=1):
             line = line.strip()
             if not line:
@@ -94,4 +94,3 @@ def merge_eval_predictions(eval_df: pd.DataFrame, predictions_df: pd.DataFrame) 
     )
     merged["prediction_missing"] = merged["_merge"].ne("both")
     return merged.drop(columns=["_merge"])
-

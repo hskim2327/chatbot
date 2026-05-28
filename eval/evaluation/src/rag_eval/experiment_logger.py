@@ -11,7 +11,6 @@ import pandas as pd
 from .config import FAILURE_EXPERIMENT_LOG, OFFICIAL_TOP_K, PHASE1_EXPERIMENT_LOG, PHASE2_EXPERIMENT_LOG
 from .path_utils import ensure_parent
 
-
 def _fieldnames_for_append(path, fallback: list[str]) -> list[str]:
     if not path.exists():
         return fallback

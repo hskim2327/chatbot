@@ -8,18 +8,15 @@ from typing import Any
 
 
 def project_root() -> Path:
-    """프로젝트 루트 경로를 반환한다.
-
-    이 평가 모듈은 원래 repo_root/evaluation 위치를 가정했지만,
-    현재 프로젝트에서는 repo_root/eval/evaluation 아래에 있다.
-    그래서 고정 parents index 대신 repo marker를 찾아 루트를 계산한다.
-    """
+    """프로젝트 루트 경로를 반환한다."""
 
     current = Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "data").is_dir() and (parent / "src").is_dir() and (parent / "scripts").is_dir():
+        if (parent / "data" / "eval").exists() and (parent / "eval" / "evaluation").exists():
             return parent
-    return current.parents[3]
+        if (parent / "data" / "eval").exists() and (parent / "new_data").exists():
+            return parent
+    return current.parents[4]
 
 
 def resolve_path(path_value: str | Path, base_dir: Path | None = None) -> Path:
