@@ -21,13 +21,28 @@ def load_chunks_by_doc(path: str | Path) -> dict[str, list[dict[str, Any]]]:
     chunk_path = Path(path)
     if not chunk_path.exists():
         return {}
-    data = json.loads(chunk_path.read_text(encoding="utf-8"))
+    data = _load_chunk_records(chunk_path)
     chunks_by_doc: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in data:
         doc_id = item.get("doc_id")
         if doc_id:
             chunks_by_doc[str(doc_id)].append(item)
     return dict(chunks_by_doc)
+
+
+def _load_chunk_records(path: Path) -> list[dict[str, Any]]:
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        return []
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and isinstance(data.get("chunks"), list):
+        return data["chunks"]
+    raise ValueError(f"Unsupported chunk sidecar format: {path}")
 
 
 def enrich_retrieved_contexts(

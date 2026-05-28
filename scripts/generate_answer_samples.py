@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import os
 import sys
@@ -7,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 from dotenv import load_dotenv
 
 if __package__ is None and __spec__ is None:
@@ -31,12 +33,11 @@ from src.generator import HuggingFaceGenerator
 
 
 DEFAULT_PREDICTIONS = (
-    "outputs/predictions/"
-    "95_dense_qdecomp_rrf_per75_docscore_mean3_targetaware30_preserve3_"
-    "kure_chroma_690_canonical.jsonl"
+    "outputs/retrieval_experiments/typeb_budget_ablation_690_full_v1/"
+    "best_variant_predictions.jsonl"
 )
 DEFAULT_CHUNK_SIDECAR = "indexes/chroma_kure_v1_chunks_v2_690/chunks.json"
-DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+DEFAULT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 
 
 def main() -> None:
@@ -45,7 +46,13 @@ def main() -> None:
     )
     parser.add_argument("--predictions", default=DEFAULT_PREDICTIONS)
     parser.add_argument("--eval-dir", default="data/eval")
-    parser.add_argument("--canonical-only", action="store_true", default=True)
+    parser.add_argument("--canonical-only", dest="canonical_only", action="store_true", default=True)
+    parser.add_argument(
+        "--all-eval-csvs",
+        dest="canonical_only",
+        action="store_false",
+        help="Load every CSV under --eval-dir instead of eval_batch_01.csv through eval_batch_25.csv.",
+    )
     parser.add_argument("--limit", type=int, default=30)
     parser.add_argument("--ids", nargs="*")
     parser.add_argument("--types", nargs="*", help="Optional eval types, e.g. A B C")
@@ -76,12 +83,14 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Build prompts and review file without loading the generation model.")
     parser.add_argument("--output", help="Defaults to outputs/generation/<timestamp>_answer_samples.jsonl")
     parser.add_argument("--review-output", help="Defaults to outputs/generation/<timestamp>_answer_review.md")
+    parser.add_argument("--csv-output", help="Defaults to outputs/generation/<timestamp>_manual_review.csv")
     args = parser.parse_args()
 
     load_dotenv()
-    output_path, review_path = resolve_outputs(args)
+    output_path, review_path, csv_path = resolve_outputs(args)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     review_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows = select_rows(args)
     if not rows:
@@ -107,6 +116,7 @@ def main() -> None:
         )
 
     review_sections = [render_review_header(args, rows)]
+    csv_rows = []
     with output_path.open("w", encoding="utf-8") as out_file:
         for index, row in enumerate(rows, 1):
             started = time.perf_counter()
@@ -143,21 +153,51 @@ def main() -> None:
             payload = build_payload(row, generation_input, answer, guardrails, latency_ms, args)
             out_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
             review_sections.append(render_review_case(payload))
+            csv_rows.append(build_manual_review_row(payload))
             print(
                 f"[PROGRESS] {index}/{len(rows)} {row['id']} "
                 f"type={row.get('type')} qtype={generation_input.question_type}"
             )
 
     review_path.write_text("\n\n".join(review_sections), encoding="utf-8")
+    write_manual_review_csv(csv_path, csv_rows)
     print(f"[DONE] jsonl: {output_path}")
     print(f"[DONE] review: {review_path}")
+    print(f"[DONE] csv: {csv_path}")
     if args.dry_run:
         print("[DRY RUN] prompts were generated without loading a Hugging Face model.")
 
 
+def load_generation_predictions(predictions_path: Path) -> pd.DataFrame:
+    try:
+        return load_predictions_jsonl(predictions_path)
+    except ValueError:
+        rows: list[dict[str, Any]] = []
+        with predictions_path.open("r", encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid JSONL at line {line_number}: {exc}") from exc
+                if "id" not in row and "question_id" in row:
+                    row["id"] = row["question_id"]
+                row.setdefault("answer", "")
+                rows.append(row)
+
+        predictions_df = pd.DataFrame(rows)
+        required_columns = ("id", "question", "answer", "retrieved_contexts")
+        missing_columns = [column for column in required_columns if column not in predictions_df.columns]
+        if missing_columns:
+            raise ValueError(f"Predictions JSONL is missing required fields: {missing_columns}")
+        return predictions_df
+
+
 def select_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
     eval_df = load_eval_csvs(Path(args.eval_dir), canonical_only=args.canonical_only)
-    pred_df = load_predictions_jsonl(Path(args.predictions))
+    pred_df = load_generation_predictions(Path(args.predictions))
     merged = merge_eval_predictions(eval_df, pred_df)
     merged = merged[~merged["prediction_missing"]].copy()
 
@@ -176,8 +216,8 @@ def select_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
         rows.append(
             {
                 "id": row.get("id"),
-                "type": row.get("type"),
-                "difficulty": row.get("difficulty"),
+                "type": _first_non_empty(row, "type_eval", "type", "type_pred"),
+                "difficulty": _first_non_empty(row, "difficulty_eval", "difficulty", "difficulty_pred"),
                 "question": question,
                 "eval_question": row.get("question_eval"),
                 "question_source": question_source,
@@ -349,11 +389,72 @@ def render_review_case(payload: dict[str, Any]) -> str:
 """.strip()
 
 
-def resolve_outputs(args: argparse.Namespace) -> tuple[Path, Path]:
+def build_manual_review_row(payload: dict[str, Any]) -> dict[str, Any]:
+    guardrails = payload.get("guardrails") or {}
+    evidence = payload.get("evidence_sentences") or []
+    retrieved_docs = [doc for doc in payload.get("retrieved_docs") or [] if doc]
+    field_candidates = payload.get("field_candidates") or {}
+    return {
+        "id": payload.get("id"),
+        "type": payload.get("type"),
+        "difficulty": payload.get("difficulty"),
+        "question_type": payload.get("question_type"),
+        "question": payload.get("question"),
+        "generated_answer": payload.get("answer"),
+        "ground_truth_answer": payload.get("ground_truth_answer"),
+        "ground_truth_docs": _json_cell(payload.get("ground_truth_docs")),
+        "retrieved_docs": _json_cell(retrieved_docs),
+        "evidence_candidates": _json_cell(evidence[:5]),
+        "field_candidates": _json_cell(field_candidates),
+        "guardrail_confidence": guardrails.get("confidence"),
+        "guardrail_warnings": _json_cell(guardrails.get("warnings") or []),
+        "latency_ms": payload.get("latency_ms"),
+        "generation_model": payload.get("generation_model"),
+        "human_correctness": "",
+        "evidence_grounded": "",
+        "failure_type": "",
+        "review_memo": "",
+    }
+
+
+def write_manual_review_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    fieldnames = [
+        "id",
+        "type",
+        "difficulty",
+        "question_type",
+        "question",
+        "generated_answer",
+        "ground_truth_answer",
+        "ground_truth_docs",
+        "retrieved_docs",
+        "evidence_candidates",
+        "field_candidates",
+        "guardrail_confidence",
+        "guardrail_warnings",
+        "latency_ms",
+        "generation_model",
+        "human_correctness",
+        "evidence_grounded",
+        "failure_type",
+        "review_memo",
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _json_cell(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def resolve_outputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output = Path(args.output) if args.output else Path("outputs/generation") / f"{timestamp}_answer_samples.jsonl"
     review = Path(args.review_output) if args.review_output else Path("outputs/generation") / f"{timestamp}_answer_review.md"
-    return output, review
+    csv_output = Path(args.csv_output) if args.csv_output else Path("outputs/generation") / f"{timestamp}_manual_review.csv"
+    return output, review, csv_output
 
 
 if __name__ == "__main__":
