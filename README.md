@@ -1,65 +1,67 @@
-# DB RAG Codeit Project
+# RAG Codeit Project - YSY Branch
 
-공공/기업 RFP 문서를 구조화하고, Chroma 기반 retrieval 실험까지 재현하기 위한 프로젝트입니다.
+이 브랜치는 팀장님 repo에서 현재 공유 기준으로 사용하는 RFP RAG 작업 브랜치입니다. parsing/corpus 생성 로직과 retrieval/generation 실험 코드를 함께 확인할 수 있도록 정리했습니다.
 
-## Repository Scope
+GitHub에는 코드, 노트북, 재현용 스크립트, 설명 문서만 포함합니다. 원본 RFP, 생성 corpus JSONL, source_store JSONL, Chroma DB, embedding cache, API key는 올리지 않습니다.
 
-GitHub에는 코드, 노트북, 설명 문서만 포함합니다. 아래 파일은 용량과 재현 환경 차이 때문에 업로드하지 않습니다.
-
-- 원본 RFP 데이터: `data/original_data_list/`
-- PDF 변환본 및 압축 파일: `data/pdf_186/`, `*.zip`
-- 파싱/청킹 산출물: `outputs/`
-- Chroma DB, embedding cache, prediction JSONL
-- `.env`, API key, 로컬 가상환경
-
-필요한 데이터와 산출물은 공유 Drive 또는 로컬 PC에 별도로 배치한 뒤 노트북 상단 경로만 맞춰 실행합니다.
-
-## Main Folders
+## 현재 기준
 
 ```text
-project_2nd/
-├─ notebooks/
-│  ├─ parsing/             # HWP/PDF 추출, artifact 정제, P1/P2 JSONL corpus 생성
-│  ├─ rag/                 # KoE5 embedding, Chroma/BM25/RRF/reranker retrieval 실험
-│  ├─ eval/                # retrieval/generation 평가 모듈
-│  ├─ context_engineering/ # 초기 context engineering 및 sanity check
-│  └─ env/                 # GCP/Colab 환경 설정 참고
-├─ src/parsing/            # 파싱 공통 라이브러리
-├─ docs/                   # 프로젝트 계획 및 협업 메모
-├─ data/                   # 로컬 데이터 위치, 원본은 GitHub 제외
-└─ outputs/                # 로컬 산출물 위치, GitHub 제외
+parsing/corpus 생성   src/parsing/, notebooks/parsing/, scripts/corpus/20260528/, scripts/g2b/
+retrieval/generation  notebooks/rag/, src/generation/, docs/plans/, docs/notes/
 ```
 
-## Recommended Order
+- corpus 생성/보정/검증 로직은 `scripts/corpus/20260528/`와 `scripts/g2b/`를 기준으로 확인합니다.
+- retrieval/generation 실험은 `notebooks/rag/`와 `src/generation/`을 기준으로 확인합니다.
+- 대용량 산출물은 별도 공유 드라이브에서 받아 로컬, Colab, GCP 런타임에 배치해서 사용합니다.
 
-1. `notebooks/parsing/hwp_text_extraction_test.ipynb`
-   - HWP 원문 추출과 artifact 정제 검증
-2. `notebooks/parsing/rfp_parsing_p2_250_pipeline.ipynb`
-   - 250개 pilot corpus 기준 P2 JSONL 생성
-3. `notebooks/parsing/quick_check_rag_chunks_p2_250.ipynb`
-   - chunk 품질과 핵심 필드 sanity check
-4. `notebooks/rag/embedding_retrieval_eval_v2_p2.ipynb`
-   - KoE5 embedding, Chroma indexing, R0~R6 retrieval 평가
-5. `notebooks/eval/evaluation/scripts/run_retrieval_eval_extended.py`
-   - retrieval 지표 확장 평가 및 누적 CSV append
+## 최종 Slim Corpus 기준
 
-## Environment
+아래 값은 최종 로컬 산출물의 `chunks_v2_*.jsonl` raw 파일 크기 기준입니다. 압축해서 공유하는 경우 실제 전달 파일은 더 작을 수 있습니다.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy .env.example .env
+| corpus | slim chunks 파일 | chunks 수 | raw JSONL 크기 | gzip 참고 크기 |
+|---|---|---:|---:|---:|
+| 125 | `chunks_v2_125.jsonl` | 19,853 | 80.86 MiB | 6.45 MiB |
+| 250 | `chunks_v2_250.jsonl` | 36,944 | 162.37 MiB | 10.73 MiB |
+| 690 | `chunks_v2_690.jsonl` | 106,776 | 476.88 MiB | 30.51 MiB |
+
+실험용 embedding에는 slim corpus의 `chunks_v2_*.jsonl`만 Chroma에 넣는 것을 권장합니다. `source_store_v2_*.jsonl`은 임베딩 대상이 아니라 generation 단계에서 원문 확장과 근거 확인에 사용하는 파일입니다.
+
+## 최종 정합성 점검 결과
+
+2026-05-28 최종 로컬 검증 기준입니다.
+
+| 점검 항목 | 결과 |
+|---|---|
+| 125/250/690 full validation | PASS |
+| 125/250/690 slim validation | PASS |
+| manifest hash와 실제 파일 hash | 일치 |
+| duplicate `chunk_id` | 0건 |
+| duplicate `source_store_id` | 0건 |
+| missing `source_ref.source_store_id` | 0건 |
+| slim 내 `embed_enabled=false` chunk | 0건 |
+| slim 내 `toc` chunk | 0건 |
+| 내부 작업용 문구(`alias 보강`, `alia보강`, `alis보강` 등) | 0건 |
+| G2B 검증 rows의 공고번호 불일치 | 0건 |
+| G2B 검증 rows의 입찰마감일 불일치 | 0건 |
+| 사업기간 tail noise | 0건 |
+
+## GitHub에 포함하지 않는 것
+
+```text
+data/original_data_list/
+data/hwpx_664/
+outputs/
+Chroma DB
+embedding cache
+prediction JSONL
+.env / API key
+zip 파일
+대용량 chunks/source_store JSONL
 ```
 
-Colab/GCP L4에서는 CUDA용 `torch`가 이미 제공되는 경우가 많으므로 `requirements.txt`에는 `torch`를 고정하지 않았습니다.
+## 실행 메모
 
-## Corpus Naming
-
-- `corpus_name`: `p2_250`
-- `corpus_version`: `v2_p2`
-- `parsing_label`: `p2_chunkfix_toc_clean`
-- 기본 retrieval 파일: `outputs/parsing_p2_250/chunks_v2.jsonl`
-- v1 baseline 파일: `outputs/parsing_p2_250/chunks_v1.jsonl`
-
-산출물은 GitHub에 포함하지 않고, 필요한 경우 공유 Drive로 전달합니다.
+1. 원본 문서와 corpus 산출물은 공유 드라이브에서 받아 같은 경로 구조로 배치합니다.
+2. corpus를 새로 만들거나 검증할 때는 `scripts/corpus/20260528/README.md`의 순서를 따릅니다.
+3. retrieval/generation 실험은 slim `chunks_v2_*.jsonl`을 기준으로 Chroma collection을 만들고, 첫 build 후에는 collection을 재사용합니다.
