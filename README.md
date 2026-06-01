@@ -1,28 +1,135 @@
-# RAG Codeit Project
-
-공공/기업 RFP 문서를 구조화하고, Chroma 기반 retrieval/generation 실험까지 재현하기 위한 프로젝트입니다. GitHub에는 코드, 노트북, 재현용 스크립트, 설명 문서만 포함하고 원본 문서와 생성 corpus 산출물은 포함하지 않습니다.
-
-## 현재 기준
+# Codeit 중급 프로젝트 - RFP Parsing 파트
 
 ```text
 parsing/corpus 생성   src/parsing/, notebooks/parsing/, scripts/corpus/20260528/, scripts/corpus/20260601/, scripts/g2b/
 retrieval/generation  notebooks/rag/, src/generation/, docs/plans/, docs/notes/
 ```
 
-- 데이터 생성 담당 범위는 HWP/HWPX 원문 처리, RFP 도메인 JSON key 설계, G2B 보강, slim corpus 생성, 정합성 검증입니다.
-- 최신 corpus 생성/보정/검증 로직은 `scripts/corpus/20260528/`, `scripts/corpus/20260601/`, `scripts/g2b/`를 기준으로 확인합니다.
-- retrieval/generation 실험은 `notebooks/rag/`와 `src/generation/`을 기준으로 확인합니다.
-- 대용량 산출물은 별도 공유 드라이브에서 받아 로컬, Colab, GCP 런타임에 배치해서 사용합니다.
+## 담당 범위 및 목표
 
-## Corpus 생성 흐름
+복잡한 기업 및 정부 제안요청서(RFP)에서 검색과 답변 생성에 필요한 정보를 안정적으로 추출하고, RAG 시스템 성능 향상에 사용할 수 있는 구조화 corpus를 만드는 것이 목표입니다.
+이 작업의 중심은 모델 자체보다 **RFP 데이터 구조화와 generation context 구성**입니다.
 
-1. 원본 HWP/PDF RFP를 준비하고, HWP는 HWPX로 변환해 표/문단 구조를 안정적으로 추출합니다. (664개 중 663개 문서 변환 성공)
-2. 문서 본문과 표를 청킹하고, RFP 도메인 키워드 기반 `fact_candidates`를 생성합니다.
-3. `project_budget`, `threshold_budget`, `reference_amount`, `base_amount`, `bid_deadline`, `project_duration`, `eligibility`, `requirements`처럼 숫자와 조건의 역할이 다른 key를 분리합니다.
-4. 원문에 없는 필수 조달 정보는 나라장터에서 보강합니다. 대상은 사업예산금액, 입찰마감일, 공고번호입니다.
-5. 125/250/690 corpus의 v2 schema를 맞추고, Chroma 적재용 slim corpus를 별도로 만듭니다.
-6. Q201처럼 `2억원`이 평가/심사 기준인데 사업예산처럼 오인되는 케이스는 최종 단계에서 `780,230,000원` 사업예산과 분리합니다.
-7. `final_corpus_audit_20260528.py`로 hash, 중복 id, source_ref, G2B 매칭, 내부 작업 문구 등을 확인합니다.
+- HWP/HWPX 기반 RFP 문서 파싱
+- Chroma 적재용 `chunks_v2_690.jsonl` corpus 설계
+- `content + metadata + chunk_id` 기반 Chroma index payload 정리
+- 사업예산, 입찰마감, 제출서류, 입찰참가자격 등 RFP 도메인 key 설계
+- generation 단계에서 질문 유형에 맞게 근거를 재구성하는 context builder 설계
+
+
+## 전체 흐름
+
+```text
+원본 RFP 문서
+-> HWPX 변환 및 파싱
+-> text / table / fact_candidates chunk 생성
+-> Chroma 적재용 JSONL corpus 생성
+-> Chroma 검색 + hybrid/rerank retrieval
+-> 질문 유형별 context builder
+-> LLM 답변 생성
+```
+
+
+## 설계 의도
+
+RFP 문서에는 숫자와 날짜가 많기 때문에 단순 텍스트 검색만으로는 잘못된 근거가 답변에 쓰일 수 있습니다. 예를 들어 같은 금액이라도 실제 사업예산, 입찰 기준 금액, 지급조건 금액은 답변에서 역할이 다릅니다.
+
+그래서 금액은 단순 숫자가 아니라 아래처럼 역할을 나눠 관리합니다.
+
+```text
+project_budget       : 실제 사업예산으로 우선 사용
+total_allocation     : 전체 배정액 또는 총액 성격
+estimated_price      : 추정가격
+base_amount          : 기초금액 또는 예정가격 관련 값
+threshold_budget     : 입찰참가자격/실적/평가 기준 금액
+reference_amount     : 참고 금액 또는 예시 금액
+payment_terms        : 선금/중도금/잔금 등 지급조건 금액
+```
+
+예산 답변에는 `answer_policy=allow_as_project_budget`, `budget_answer_enabled=True`인 근거를 우선 사용하도록 설계했습니다.
+
+
+## 주요 JSONL 구조
+
+`chunks_v2_690.jsonl`은 한 줄에 하나의 검색 chunk가 저장되는 JSONL 파일입니다. Chroma에 넣을 때는 아래처럼 대응됩니다.
+
+```text
+chunk_id  -> Chroma ids
+content   -> Chroma documents
+metadata  -> Chroma metadatas
+```
+
+```text
+JSONL record
+├─ chunk_id
+│  └─ 청크 고유 ID. Chroma ids로 사용
+│
+├─ chunk_type
+│  ├─ text            : 일반 문단/조항 기반 검색 청크
+│  ├─ table           : 표에서 추출한 검색 청크
+│  └─ fact_candidates : 예산, 기간, 제출서류, 자격요건 같은 핵심 후보 정보
+│
+├─ content
+│  └─ 실제 임베딩 대상 텍스트. Chroma documents로 사용
+│
+├─ source_file
+│  └─ 원본 RFP 파일명. 검색 결과 출처 표시와 정성 검토에 사용
+│
+├─ metadata
+│  ├─ 문서 식별
+│  │  ├─ issuer              : 발주기관 또는 수요기관
+│  │  ├─ project_name        : 사업명
+│  │  └─ document_identity   : 문서/사업 식별용 alias
+│  │
+│  ├─ 위치·구조
+│  │  ├─ section_path        : 문서 내 장/절/항 위치
+│  │  ├─ table_role          : 예산표, 평가표, 제출서류표 등 표의 역할
+│  │  └─ row_group           : 병합 셀이나 묶음 행의 의미 단위
+│  │
+│  ├─ 답변 정책
+│  │  ├─ fact_type           : 이 chunk가 담고 있는 사실 유형
+│  │  ├─ answer_policy       : 최종 답변에 직접 써도 되는지에 대한 정책
+│  │  ├─ confidence          : 추출 신뢰도
+│  │  └─ status              : extracted, source_verified, needs_review 등
+│  │
+│  ├─ 금액 역할
+│  │  ├─ project_budget      : 실제 사업예산, 사업비, 사업금액
+│  │  ├─ total_allocation    : 전체 배정액 또는 총액 성격의 금액
+│  │  ├─ estimated_price     : 추정가격
+│  │  ├─ base_amount         : 기초금액 또는 예정가격 관련 값
+│  │  ├─ threshold_budget    : 입찰참가자격, 실적, 평가 기준 금액
+│  │  ├─ reference_amount    : 참고 금액, 예시 금액
+│  │  └─ payment_terms       : 선금, 중도금, 잔금 등 지급조건 금액
+│  │
+│  ├─ 일정·제출
+│  │  ├─ bid_deadline        : 입찰마감일시
+│  │  ├─ project_duration    : 사업기간 또는 수행기간
+│  │  ├─ submission_documents: 제출서류
+│  │  ├─ submission_date     : 제안서 제출일자
+│  │  ├─ submission_method   : 제출방법
+│  │  └─ submission_place    : 제출장소
+│  │
+│  └─ 자격·요구사항
+│     ├─ eligibility         : 입찰참가자격, 면허, 실적 조건
+│     ├─ requirements        : 기능/시스템 요구사항
+│     └─ technical_scope     : 기술 범위와 시스템 구성 범위
+│
+└─ source_ref
+   └─ 필요한 경우 상세 근거를 추가 확인하기 위한 참조 key
+```
+
+## Chroma 적재 방식
+
+```python
+collection.add(
+    ids=[record["chunk_id"]],
+    documents=[record["content"]],
+    metadatas=[record["metadata"]],
+)
+```
+
+metadata에는 긴 원문이나 큰 표 전체를 넣지 않고, 검색 결과를 해석하고 필터링하는 데 필요한 짧은 값만 넣습니다.
+
 
 ## 최종 Slim Corpus 기준
 
@@ -36,7 +143,26 @@ retrieval/generation  notebooks/rag/, src/generation/, docs/plans/, docs/notes/
 
 실험용 embedding에는 slim corpus의 `chunks_v2_*.jsonl`만 Chroma에 넣으면 됩니다. `source_store_v2_*.jsonl`은 임베딩 대상이 아니라 generation 단계에서 원문 확장과 근거 확인에 사용하는 파일입니다.
 
-## Retrieval 실험 기준
+
+## Context Builder
+
+generation 단계에서는 retrieval 결과를 그대로 LLM에 넣지 않고, 질문 유형에 맞게 context를 다시 조립합니다.
+
+```text
+question
+-> target_slots 추출
+-> intent_plan 생성
+-> fact_candidates / table / text chunk 재정렬
+-> computed_values 생성
+-> evidence_blocks 구성
+-> LLM prompt 입력
+-> deterministic 후처리
+```
+
+특히 예산, 차액, 합산, 제출서류, 입찰참가자격, multi-doc 비교 질문에서 metadata를 적극적으로 사용합니다.
+
+
+## Retrieval/Generaion 실험 기준
 
 데이터 검증을 위한 retrieval 125 corpus exp100 기준 주요 결과는 다음과 같습니다.
 
@@ -48,6 +174,34 @@ retrieval/generation  notebooks/rag/, src/generation/, docs/plans/, docs/notes/
 | J5 hybrid | dense + BM25 RRF + reranker | 0.99 | 0.9725 | 0.9514 |
 
 J5가 가장 안정적이지만 가장 느립니다. J3는 속도와 성능의 균형이 좋고, BM25는 단독 성능은 낮지만 숫자, 기관명, 공고명처럼 표면 단어가 중요한 질문에서 보완 역할을 합니다.
+
+Generation은 Gemini-3.1 flash lite 모델 50문항 실험에서 JSON 형식과 숫자 grounding 안정성이 가장 좋았습니다.
+
+```text
+valid JSON 1.00 / numeric grounded 1.00 / source numeric grounded 1.00
+```
+
+
+## 주요 파일 위치
+
+```text
+data/690_new/README.md
+data/690_new/json_key_description.md
+docs/p4_data_generation_final_report_20260601.md
+docs/jsonl_key_tree_three_slides.html
+src/generation/rfp_generation.py
+src/parsing/rfp_p4_goalfix_postprocess.py
+notebooks/rag/rfp_retrieval_generation_p4_hwpx_125_pipeline_gemini.ipynb
+```
+
+## 실행 시 주의
+
+- Chroma에는 기본적으로 `chunks_v2_*.jsonl`을 적재합니다.
+- `source_store_v2_*.jsonl`은 직접 임베딩하지 않습니다.
+- Chroma DB와 embedding cache는 GitHub에 올리지 않습니다.
+- Google Drive에 Chroma DB를 직접 만들면 느려질 수 있으므로 Colab/GCP 로컬 런타임 경로를 권장합니다.
+- corpus hash가 같다면 embedding/Chroma를 매번 새로 만들 필요가 없습니다.
+
 
 ## GitHub에 포함하지 않는 것
 
@@ -64,9 +218,3 @@ zip 파일
 개인 회의용 HTML/대본
 ```
 
-## 실행 메모
-
-1. 원본 문서와 corpus 산출물은 공유 드라이브에서 받아 같은 경로 구조로 배치합니다.
-2. corpus를 새로 만들거나 검증할 때는 `scripts/corpus/20260528/README.md`의 순서를 따릅니다.
-3. 2026-06-01 이후 Q201 CMS 예산 guard까지 반영하려면 `scripts/corpus/20260601/apply_q201_cms_budget_guard_20260601.py --project-root . --apply`를 실행한 뒤 audit을 다시 실행합니다.
-4. 수정된 corpus를 사용하면 기존 Chroma collection은 재사용하지 말고 다시 생성해야 합니다.
