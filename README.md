@@ -2,6 +2,31 @@
 
 나라장터 RFP 문서를 발주기관 기준으로 검색하고, 선택한 문서 근거를 바탕으로 답변하는 RAG chatbot입니다.
 
+## 프로젝트 소개
+
+본 프로젝트는 나라장터 RFP 문서를 대상으로 발주기관 필터 기반 문서 검색과 질의응답을 수행하는 chatbot입니다.  
+사용자는 발주기관을 선택한 뒤 질문을 입력할 수 있으며, 시스템은 ChromaDB에 저장된 문서 chunk를 검색하고 LLM을 통해 답변을 생성합니다.
+
+주요 기능은 다음과 같습니다.
+
+- 발주기관 기반 문서군 필터링
+- Dense retrieval + sparse retrieval 기반 hybrid 검색
+- metadata 기반 reranking
+- 질문 유형별 context selection
+- OpenAI 또는 HuggingFace transformers LLM 선택 실행
+- 나라장터 G2B 공고번호 기반 추가 확인 안내
+
+## 팀원 및 역할
+
+| 역할 | 팀원 |
+|---|---|
+| PM | 김현숙 |
+| data processing (text, chunk) | 조용준, 유소연 |
+| huggingface line (embedding + llm) | 김현숙, 김범수 |
+| openai line | 송우현 |
+| 평가지표 | 이다현 |
+| 보고서, PPT | 조용준 |
+
 ## 폴더 구성
 
 ```text
