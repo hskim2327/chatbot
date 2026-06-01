@@ -32,7 +32,7 @@
 ## 보고서 및 협업일지
 
 - [프로젝트 보고서 PDF 다운로드](./assets/TEAM3_RFP_Report.pdf)
-- [TEAM 3 협업일지 바로가기](협업일지_링크를_여기에_입력)
+- [TEAM 3 협업일지 바로가기](https://app.notion.com/p/35f26b1870a380648fdbc65395ed6586?v=35f26b1870a381a38aed000ce8f9938a)
 
 ## Demo
 
