@@ -16,17 +16,17 @@ retrieval/generation  notebooks/rag/, src/generation/, docs/plans/, docs/notes/
 
 ## Corpus 생성 흐름
 
-1. 원본 HWP/PDF RFP를 준비하고, HWP는 가능한 경우 HWPX로 변환해 표/문단 구조를 안정적으로 추출합니다.
+1. 원본 HWP/PDF RFP를 준비하고, HWP는 HWPX로 변환해 표/문단 구조를 안정적으로 추출합니다. (664개 중 663개 문서 변환 성공)
 2. 문서 본문과 표를 청킹하고, RFP 도메인 키워드 기반 `fact_candidates`를 생성합니다.
 3. `project_budget`, `threshold_budget`, `reference_amount`, `base_amount`, `bid_deadline`, `project_duration`, `eligibility`, `requirements`처럼 숫자와 조건의 역할이 다른 key를 분리합니다.
-4. 원문에 없는 필수 조달 정보는 나라장터/G2B에서 보강합니다. 대상은 사업예산금액, 입찰마감일, 공고번호입니다.
+4. 원문에 없는 필수 조달 정보는 나라장터에서 보강합니다. 대상은 사업예산금액, 입찰마감일, 공고번호입니다.
 5. 125/250/690 corpus의 v2 schema를 맞추고, Chroma 적재용 slim corpus를 별도로 만듭니다.
-6. Q201처럼 `2억원`이 평가/심사 기준인데 사업예산처럼 오인되는 케이스는 최종 guard 단계에서 `780,230,000원` 사업예산과 분리합니다.
-7. `final_corpus_audit_20260528.py`로 hash, 중복 id, source_ref, G2B 매칭, 내부 작업 문구, Q201 guard를 확인합니다.
+6. Q201처럼 `2억원`이 평가/심사 기준인데 사업예산처럼 오인되는 케이스는 최종 단계에서 `780,230,000원` 사업예산과 분리합니다.
+7. `final_corpus_audit_20260528.py`로 hash, 중복 id, source_ref, G2B 매칭, 내부 작업 문구 등을 확인합니다.
 
 ## 최종 Slim Corpus 기준
 
-아래 값은 최종 로컬 산출물의 slim `chunks_v2_*.jsonl` raw 파일 크기 기준입니다. 압축해서 공유하는 경우 실제 전달 파일은 더 작을 수 있습니다.
+아래 값은 최종 로컬 산출물의 slim `chunks_v2_*.jsonl` raw 파일 크기 기준입니다. 
 
 | corpus | slim chunks 파일 | chunks 수 | raw JSONL 크기 |
 |---|---|---:|---:|
@@ -34,11 +34,11 @@ retrieval/generation  notebooks/rag/, src/generation/, docs/plans/, docs/notes/
 | 250 | `chunks_v2_250.jsonl` | 36,945 | 125.53 MiB |
 | 690 | `chunks_v2_690.jsonl` | 106,777 | 366.61 MiB |
 
-실험용 embedding에는 slim corpus의 `chunks_v2_*.jsonl`만 Chroma에 넣는 것을 권장합니다. `source_store_v2_*.jsonl`은 임베딩 대상이 아니라 generation 단계에서 원문 확장과 근거 확인에 사용하는 파일입니다.
+실험용 embedding에는 slim corpus의 `chunks_v2_*.jsonl`만 Chroma에 넣으면 됩니다. `source_store_v2_*.jsonl`은 임베딩 대상이 아니라 generation 단계에서 원문 확장과 근거 확인에 사용하는 파일입니다.
 
 ## Retrieval 실험 기준
 
-125 corpus exp100 기준 주요 결과는 다음과 같습니다.
+데이터 검증을 위한 retrieval 125 corpus exp100 기준 주요 결과는 다음과 같습니다.
 
 | 조건 | 설명 | hit@5 | doc recall@5 | multi-doc recall@5 |
 |---|---|---:|---:|---:|
