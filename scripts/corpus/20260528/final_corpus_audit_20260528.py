@@ -47,6 +47,11 @@ KEY_DOC_PATTERNS = [
     ("afs_is", "AFSIS"),
 ]
 
+Q201_TARGET_TITLE = "건설통합시스템(CMS) 고도화"
+Q201_PROJECT_BUDGET_KRW = "780230000"
+Q201_TABLE_GUARD = "이 표의 억 단위 금액은 평가/참여/심사 기준 금액이며 사업예산 답변에 사용하지 않습니다"
+Q201_TABLE_AMOUNT_TOKENS = ["2억원", "15억원", "20억원", "25억원"]
+
 
 def nfc(value: object) -> str:
     return unicodedata.normalize("NFC", str(value or "")).strip()
@@ -167,6 +172,74 @@ def scan_records(path: Path, id_key: str):
     }
 
 
+
+def scan_q201_budget_guard(chunk_path: Path):
+    result = {
+        "target_rows": 0,
+        "project_budget_rows": 0,
+        "bad_summary_rows": 0,
+        "bad_estimated_price_rows": 0,
+        "unguarded_table_amount_rows": 0,
+        "wrong_guard_metadata_rows": 0,
+    }
+    if not chunk_path.exists():
+        return result
+
+    for _, obj in read_jsonl(chunk_path):
+        md = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+        haystack = "\n".join(
+            nfc(value)
+            for value in [
+                obj.get("source_file"),
+                obj.get("doc_key"),
+                obj.get("project_name"),
+                md.get("source_file"),
+                md.get("doc_key"),
+                md.get("project_name"),
+                str(obj.get("content") or "")[:500],
+            ]
+        )
+        if Q201_TARGET_TITLE not in haystack:
+            continue
+
+        result["target_rows"] += 1
+        fact_type = value_from(obj, "fact_type")
+        chunk_type = value_from(obj, "chunk_type")
+        content = str(obj.get("content") or "")
+
+        if fact_type == "project_budget" and (
+            Q201_PROJECT_BUDGET_KRW in content
+            or value_from(obj, "final_budget_krw") == Q201_PROJECT_BUDGET_KRW
+            or value_from(obj, "amount_krw") == Q201_PROJECT_BUDGET_KRW
+        ):
+            result["project_budget_rows"] += 1
+
+        if fact_type == "document_summary" and not (
+            value_from(obj, "final_budget_krw") == Q201_PROJECT_BUDGET_KRW
+            and value_from(obj, "amount_type") == "project_budget"
+        ):
+            result["bad_summary_rows"] += 1
+
+        if fact_type == "estimated_price":
+            result["bad_estimated_price_rows"] += 1
+
+        if chunk_type in {"table", "text"} and any(token in content for token in Q201_TABLE_AMOUNT_TOKENS):
+            if Q201_TABLE_GUARD not in content:
+                result["unguarded_table_amount_rows"] += 1
+            else:
+                raw_budget_enabled = obj.get("budget_answer_enabled")
+                if raw_budget_enabled in (None, ""):
+                    raw_budget_enabled = md.get("budget_answer_enabled", "")
+                raw_budget_role = obj.get("budget_value_role")
+                if raw_budget_role in (None, ""):
+                    raw_budget_role = md.get("budget_value_role", "")
+                budget_disabled = raw_budget_enabled is False or str(raw_budget_enabled).strip().lower() == "false"
+                if not budget_disabled or nfc(raw_budget_role) != "evaluation_or_review_threshold_not_project_budget":
+                    result["wrong_guard_metadata_rows"] += 1
+
+    return result
+
+
 def audit_package(label: str, folder: Path, suffix: str, slim: bool, g2b_by_source: dict):
     chunk_path = folder / f"chunks_v2_{suffix}.jsonl"
     source_path = folder / f"source_store_v2_{suffix}.jsonl"
@@ -195,6 +268,7 @@ def audit_package(label: str, folder: Path, suffix: str, slim: bool, g2b_by_sour
         "duration_doc_count": 0,
         "duration_tail_noise_count": 0,
         "duration_tail_noise_samples": [],
+        "q201_budget_guard": {},
         "known_docs": {},
     }
     if not folder.exists():
@@ -231,6 +305,7 @@ def audit_package(label: str, folder: Path, suffix: str, slim: bool, g2b_by_sour
     report["forbidden_count"] = len(chunk["forbidden_hits"]) + len(source["forbidden_hits"])
     report["slim_false_chunks"] = chunk["chunk_embed_false"] if slim else None
     report["slim_toc_chunks"] = chunk["chunk_toc"] if slim else None
+    report["q201_budget_guard"] = scan_q201_budget_guard(chunk_path)
 
     # Validation line counts when present.
     if validation.get("chunks_jsonl_line_count") is not None:
@@ -330,6 +405,7 @@ def main():
                 "samples": report["duration_tail_noise_samples"][:3],
             },
         )
+        print("q201_budget_guard:", report["q201_budget_guard"])
         print("known_docs:", json.dumps(report["known_docs"], ensure_ascii=False)[:4000])
         print()
 
@@ -344,6 +420,12 @@ def main():
         for key in ("duplicate_chunk_id", "duplicate_source_store_id", "missing_source_ref", "forbidden_count", "g2b_notice_mismatch", "g2b_deadline_mismatch", "duration_tail_noise_count"):
             if r[key]:
                 fatal.append((r["label"], key, r[key]))
+        q201 = r.get("q201_budget_guard") or {}
+        if q201.get("project_budget_rows", 0) < 1:
+            fatal.append((r["label"], "q201_project_budget_missing", q201))
+        for key in ("bad_summary_rows", "bad_estimated_price_rows", "unguarded_table_amount_rows", "wrong_guard_metadata_rows"):
+            if q201.get(key, 0):
+                fatal.append((r["label"], f"q201_{key}", q201.get(key)))
         if "slim" in r["label"] and (r["slim_false_chunks"] or r["slim_toc_chunks"]):
             fatal.append((r["label"], "slim_policy_violation", (r["slim_false_chunks"], r["slim_toc_chunks"])))
 

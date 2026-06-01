@@ -1,34 +1,27 @@
-# P4 Corpus Build, Datafix, And QC Scripts (2026-05-28)
+# P4 Corpus Build, Datafix, And QC Scripts
 
-This folder keeps the minimum reusable scripts needed to reproduce the P4 RFP
-corpus build and final package checks. It intentionally excludes one-off debug
-probes, meeting notes, generated corpora, source documents, Chroma databases,
-and embedding caches.
+This folder keeps the minimum reusable scripts needed to reproduce the P4 RFP corpus build, final datafixes, slim package creation, and package-level QC. It intentionally excludes one-off debug probes, meeting notes, generated corpora, source documents, Chroma databases, and embedding caches.
 
 ## Source-Of-Truth Policy
 
 1. Use original RFP documents first.
-2. Use verified G2B/Nara data only when a required procurement metadata field or
-   project budget is missing from the original document.
-3. Treat CSV values as candidates. Before promoting a number, classify its role:
-   project budget, estimated price, base amount, qualification threshold,
-   payment amount, service fee, date/deadline value, or unrelated reference.
+2. Use verified G2B/Nara data only when a required procurement metadata field or project budget is missing from the original document.
+3. Treat CSV values as candidates. Before promoting a number, classify its role: project budget, estimated price, base amount, qualification threshold, payment amount, service fee, date/deadline value, or unrelated reference.
+4. Never use a number as an answer merely because it is correct as a number. The number must be mapped to the correct role.
 
 ## Expected Inputs
 
 - `data/original_data_list/`: original HWP/PDF RFP files.
 - `data/hwpx_664/`: HWPX conversions used to parse HWP originals when available.
 - `data/eval/`: evaluation ground-truth files, if available.
-- `data/g2b_notice_enrichment_690_strict_budget_reconciled.csv`: reconciled G2B
-  enrichment CSV.
+- `data/g2b_notice_enrichment_690_strict_budget_reconciled.csv`: reconciled G2B enrichment CSV.
 - `config/manual_overrides/*.csv`: conservative manual override tables.
 
 Large inputs and generated outputs are not committed to git.
 
 ## Main Flow
 
-Run from the repository root. `PROJECT_ROOT` is optional; by default scripts
-infer the repo root from this folder location.
+Run from the repository root. `PROJECT_ROOT` is optional; by default scripts infer the repo root from this folder location.
 
 ```bash
 python scripts/corpus/20260528/build_p4_original_corpus_250_690.py
@@ -36,13 +29,19 @@ python scripts/corpus/20260528/apply_final_corpus_datafix_20260528.py
 python scripts/corpus/20260528/propagate_g2b_notice_deadline_20260528.py
 python scripts/corpus/20260528/align_250_690_schema_to_125_20260528.py
 python scripts/corpus/20260528/build_slim_corpus_20260528.py
+python scripts/corpus/20260601/apply_q201_cms_budget_guard_20260601.py --project-root . --apply
 python scripts/corpus/20260528/final_corpus_audit_20260528.py
+```
+
+Use the Q201 guard script in `--check` mode first when validating an existing package:
+
+```bash
+python scripts/corpus/20260601/apply_q201_cms_budget_guard_20260601.py --project-root . --check
 ```
 
 ## G2B Enrichment Flow
 
-The G2B scripts live in `scripts/g2b/`. They are separated from corpus scripts
-because G2B values are enrichment candidates, not the primary corpus source.
+The G2B scripts live in `scripts/g2b/`. They are separated from corpus scripts because G2B values are enrichment candidates, not the primary corpus source.
 
 Typical order:
 
@@ -63,5 +62,6 @@ python scripts/g2b/g2b_strict_budget_reconcile.py --project-root . --input data/
 - internal marker leakage such as `alias 보강`
 - slim policy: only `embed_enabled == true`, no `toc` chunks
 - suspicious project-duration tail noise
+- Q201 CMS guard: `780,230,000원` project budget exists, `2억원` estimated/evaluation amounts are not final budget candidates, and table/text chunks with `2억원/15억원/20억원/25억원` are guarded
 
 The final shared corpus should pass these checks before handoff.
