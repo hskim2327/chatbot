@@ -1,3 +1,5 @@
+accelerate
+bitsandbytes
 chromadb
 datasets
 faiss-cpu
@@ -12,3 +14,4 @@ rank-bm25
 sentence-transformers
 tqdm
 matplotlib
+peft

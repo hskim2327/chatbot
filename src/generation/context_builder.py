@@ -99,7 +99,7 @@ def collect_field_candidates(context_records: list[dict[str, Any]]) -> dict[str,
             _append_unique(candidates["dates"], value)
 
         text = record.get("text") or ""
-        for value in MONEY_PATTERN.findall(text):
+        for value in _amount_normalization_values(text, metadata=metadata):
             _append_unique(candidates["amounts"], value)
         for value in DATE_PATTERN.findall(text):
             _append_unique(candidates["dates"], value)
@@ -227,6 +227,7 @@ def _context_record(rank: int, context: dict[str, Any], context_max_chars: int) 
     text = str(context.get("text") or "")
     if context_max_chars > 0:
         text = text[:context_max_chars]
+    text = _append_amount_normalization_lines(text, metadata=metadata)
     return {
         "rank": rank,
         "filename": context.get("filename") or metadata.get("source_file"),
@@ -293,6 +294,124 @@ def _append_unique(values: list[str], value: Any) -> None:
     text = str(value).strip()
     if text and text not in values:
         values.append(text)
+
+
+def _amount_normalization_values(
+    text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    max_items: int = 8,
+) -> list[str]:
+    items = _amount_normalization_items(text, metadata=metadata, max_items=max_items)
+    return [f"{item['raw']} -> {_format_won(item['won'])}" for item in items]
+
+
+def _append_amount_normalization_lines(text: str, *, metadata: dict[str, Any] | None = None) -> str:
+    if "[금액 정규화]" in str(text or ""):
+        return str(text or "")
+    items = _amount_normalization_items(str(text or ""), metadata=metadata, max_items=8)
+    if not items:
+        return str(text or "")
+    lines = ["[금액 정규화] 원문 금액과 원 단위 환산값"]
+    for item in items:
+        lines.append(f"- 원문: {item['raw']} | 정규화: {_format_won(item['won'])} | KRW: {item['won']}")
+    return "\n".join(lines + [str(text or "")])
+
+
+def _amount_normalization_items(
+    text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    max_items: int = 8,
+) -> list[dict[str, Any]]:
+    metadata = metadata or {}
+    values: list[dict[str, Any]] = []
+    for raw_key, won_key in (
+        ("final_budget", "final_budget_krw"),
+        ("budget", "budget_krw"),
+        ("budget_text", "budget_krw"),
+    ):
+        won = _safe_int(metadata.get(won_key))
+        raw = metadata.get(raw_key)
+        if won:
+            values.append({"raw": str(raw or _format_won(won)), "won": won})
+        elif raw:
+            converted = _amount_to_won(str(raw))
+            if converted:
+                values.append({"raw": str(raw), "won": converted})
+    scan_text = _strip_amount_normalization_lines(str(text or ""))
+    for match in MONEY_PATTERN.finditer(scan_text):
+        raw = match.group(0)
+        won = _amount_to_won(raw)
+        if won:
+            values.append({"raw": raw, "won": won})
+    return _dedupe_amount_values(values, max_items=max_items)
+
+
+def _dedupe_amount_values(values: list[dict[str, Any]], max_items: int = 8) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for value in values:
+        raw = str(value.get("raw") or "").strip()
+        won = _safe_int(value.get("won"))
+        if not raw or not won:
+            continue
+        key = (re.sub(r"\s+", "", raw).casefold(), won)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append({"raw": raw, "won": won})
+        if len(deduped) >= max_items:
+            break
+    return deduped
+
+
+def _amount_to_won(raw: str) -> int | None:
+    value = str(raw or "").replace(",", "").replace(" ", "")
+    number_match = re.search(r"\d+(?:\.\d+)?", value)
+    if not number_match:
+        return None
+    number = float(number_match.group(0))
+    if "조" in value:
+        number *= 1_000_000_000_000
+    elif "억" in value:
+        number *= 100_000_000
+    elif "백만원" in value or "백만" in value:
+        number *= 1_000_000
+    elif "천만원" in value or "천만" in value:
+        number *= 10_000_000
+    elif "만원" in value:
+        number *= 10_000
+    elif "천원" in value:
+        number *= 1_000
+    return int(round(number))
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        text = re.sub(r"[^0-9.-]", "", str(value or ""))
+        if not text:
+            return 0
+        return int(round(float(text)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _format_won(value: Any) -> str:
+    try:
+        return f"{int(round(float(value))):,}원"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _strip_amount_normalization_lines(text: str) -> str:
+    lines = []
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[금액 정규화]") or stripped.startswith("- 원문:"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _coerce_list(value: Any) -> list[Any]:

@@ -1,0 +1,7 @@
+pandas>=2.2,<3
+openpyxl>=3.1,<4
+datasets>=2.18,<3
+ragas==0.1.21
+pytest>=8,<9
+python-dotenv>=1,<2
+openai>=1,<3

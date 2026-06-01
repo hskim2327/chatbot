@@ -13,6 +13,10 @@ class HuggingFaceGenerationConfig:
     repetition_penalty: float = 1.05
     device: str | None = None
     torch_dtype: str = "auto"
+    load_in_4bit: bool = False
+    bnb_4bit_compute_dtype: str = "float16"
+    enable_thinking: bool | None = None
+    adapter_path: str | None = None
 
 
 class HuggingFaceGenerator:
@@ -27,6 +31,10 @@ class HuggingFaceGenerator:
         repetition_penalty: float = 1.05,
         device: str | None = None,
         torch_dtype: str = "auto",
+        load_in_4bit: bool = False,
+        bnb_4bit_compute_dtype: str = "float16",
+        enable_thinking: bool | None = None,
+        adapter_path: str | None = None,
     ):
         self.config = HuggingFaceGenerationConfig(
             model_name=model_name,
@@ -36,6 +44,10 @@ class HuggingFaceGenerator:
             repetition_penalty=repetition_penalty,
             device=device,
             torch_dtype=torch_dtype,
+            load_in_4bit=load_in_4bit,
+            bnb_4bit_compute_dtype=bnb_4bit_compute_dtype,
+            enable_thinking=enable_thinking,
+            adapter_path=adapter_path,
         )
         self._tokenizer = None
         self._model = None
@@ -53,7 +65,17 @@ class HuggingFaceGenerator:
         messages.append({"role": "user", "content": prompt})
 
         if getattr(tokenizer, "chat_template", None):
-            input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            chat_kwargs: dict[str, Any] = {
+                "tokenize": False,
+                "add_generation_prompt": True,
+            }
+            if self.config.enable_thinking is not None:
+                chat_kwargs["enable_thinking"] = self.config.enable_thinking
+            try:
+                input_text = tokenizer.apply_chat_template(messages, **chat_kwargs)
+            except TypeError:
+                chat_kwargs.pop("enable_thinking", None)
+                input_text = tokenizer.apply_chat_template(messages, **chat_kwargs)
         else:
             input_text = self._fallback_chat_text(messages)
 
@@ -91,12 +113,37 @@ class HuggingFaceGenerator:
         dtype = self._resolve_torch_dtype(device)
 
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_name, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            self.config.model_name,
-            torch_dtype=dtype,
-            trust_remote_code=True,
-        )
-        model.to(device)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        model_kwargs: dict[str, Any] = {
+            "trust_remote_code": True,
+        }
+        if self.config.load_in_4bit:
+            from transformers import BitsAndBytesConfig
+
+            compute_dtype = self._resolve_bnb_compute_dtype()
+            model_kwargs.update(
+                {
+                    "quantization_config": BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=compute_dtype,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_use_double_quant=True,
+                    ),
+                    "device_map": {"": device} if device != "cpu" else None,
+                }
+            )
+        else:
+            model_kwargs["torch_dtype"] = dtype
+
+        model = AutoModelForCausalLM.from_pretrained(self.config.model_name, **model_kwargs)
+        if self.config.adapter_path:
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(model, self.config.adapter_path)
+        if not self.config.load_in_4bit:
+            model.to(device)
         model.eval()
 
         self._tokenizer = tokenizer
@@ -112,6 +159,11 @@ class HuggingFaceGenerator:
         if device == "cuda":
             return torch.float16
         return torch.float32
+
+    def _resolve_bnb_compute_dtype(self):
+        import torch
+
+        return getattr(torch, self.config.bnb_4bit_compute_dtype)
 
     @staticmethod
     def _coerce_prompt(query: str, contexts: list[str] | str) -> str:

@@ -20,23 +20,30 @@ EVAL_SRC = Path(__file__).resolve().parents[1] / "eval" / "evaluation" / "src"
 if str(EVAL_SRC) not in sys.path:
     sys.path.insert(0, str(EVAL_SRC))
 
+from rag_eval.config import EVAL_REQUIRED_COLUMNS
 from rag_eval.loaders import load_eval_csvs, load_predictions_jsonl, merge_eval_predictions
+from rag_eval.normalization import parse_doc_list, parse_structured_cell
 
 from src.generation import (
+    DEFAULT_SOURCE_STORE,
+    advanced_guardrails,
     build_generation_input,
+    build_rfp_generation_input,
     dedupe_repeated_lines,
     enrich_retrieved_contexts,
     load_chunks_by_doc,
+    load_rfp_generation_resources,
+    postprocess_rfp_generation_answer,
     validate_generation_answer,
 )
 from src.generator import HuggingFaceGenerator
 
 
 DEFAULT_PREDICTIONS = (
-    "outputs/retrieval_experiments/typeb_budget_ablation_690_full_v1/"
-    "best_variant_predictions.jsonl"
+    "outputs/predictions/"
+    "102_best_dense_qdecomp_docscore_targetaware_kure_chroma_chunks_v2_125_canonical.jsonl"
 )
-DEFAULT_CHUNK_SIDECAR = "indexes/chroma_kure_v1_chunks_v2_690/chunks.json"
+DEFAULT_CHUNK_SIDECAR = "indexes/chroma_kure_v1_chunks_v2_125/chunks.json"
 DEFAULT_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 
 
@@ -46,6 +53,7 @@ def main() -> None:
     )
     parser.add_argument("--predictions", default=DEFAULT_PREDICTIONS)
     parser.add_argument("--eval-dir", default="data/eval")
+    parser.add_argument("--eval-file", help="Load one eval CSV file instead of --eval-dir.")
     parser.add_argument("--canonical-only", dest="canonical_only", action="store_true", default=True)
     parser.add_argument(
         "--all-eval-csvs",
@@ -59,6 +67,10 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--device", help="cuda or cpu. Defaults to cuda if available.")
     parser.add_argument("--torch-dtype", default="auto", help="auto, float16, bfloat16, or float32")
+    parser.add_argument("--load-in-4bit", action="store_true", help="Load the HF model with bitsandbytes 4bit quantization.")
+    parser.add_argument("--bnb-4bit-compute-dtype", default="float16", help="float16 or bfloat16 for 4bit compute.")
+    parser.add_argument("--enable-thinking", action="store_true", help="Enable Qwen3 thinking mode. Disabled by default for concise RAG answers.")
+    parser.add_argument("--adapter-path", help="Optional PEFT/LoRA adapter directory to load on top of the HF model.")
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--top-p", type=float, default=0.9)
     parser.add_argument("--max-new-tokens", type=int, default=512)
@@ -76,7 +88,45 @@ def main() -> None:
         default=8,
         help="Maximum unique documents to pass to generation. 0 disables the document cap.",
     )
+    parser.add_argument(
+        "--context-mode",
+        choices=[
+            "current",
+            "rfp_full",
+            "rfp_recommended",
+            "rfp_target_evidence",
+            "rfp_target_evidence_guarded_source",
+            "rfp_required_fields",
+            "rfp_auto_route_104_114",
+            "rfp_budget_target_evidence",
+            "rfp_preserve_top_evidence",
+            "rfp_selective_top_evidence",
+            "rfp_phase3_balanced_evidence",
+            "rfp_service_route_v3",
+        ],
+        default="current",
+        help=(
+            "current keeps the existing lightweight context builder. "
+            "rfp_full uses the imported rfp_generation defaults. "
+            "rfp_recommended uses the same techniques with shorter context limits. "
+            "rfp_target_evidence relaxes target fallback and puts direct evidence first. "
+            "rfp_target_evidence_guarded_source keeps that mode but only promotes source_store budget values when corroborated. "
+            "rfp_required_fields uses field/table/chunk-first context for required-field extraction. "
+            "rfp_auto_route_104_114 classifies the question and routes required_fields to 104-style context, others to guarded 114-style context. "
+            "rfp_budget_target_evidence applies that behavior mainly to budget questions. "
+            "rfp_preserve_top_evidence preserves raw top documents and required fact evidence per document. "
+            "rfp_selective_top_evidence preserves only target-matched/fact-bearing raw top documents. "
+            "rfp_phase3_balanced_evidence uses Phase3 task_family guidance, compact source_store, and per-target required evidence balancing. "
+            "rfp_service_route_v3 keeps service-time routing but adds budget reference values, structured multi-doc answers, and eligibility-only postprocessing."
+        ),
+    )
     parser.add_argument("--chunk-sidecar", default=DEFAULT_CHUNK_SIDECAR)
+    parser.add_argument("--source-store-path", default=DEFAULT_SOURCE_STORE)
+    parser.add_argument("--use-source-store", action="store_true")
+    parser.add_argument(
+        "--domain-gold-path",
+        help="Optional Phase3/4 domain gold JSONL used only to pass task_family metadata into generation context. Eval files are not modified.",
+    )
     parser.add_argument("--max-extra-contexts", type=int, default=5)
     parser.add_argument("--max-extra-per-doc", type=int, default=2)
     parser.add_argument("--no-context-enrichment", action="store_true")
@@ -97,12 +147,27 @@ def main() -> None:
         raise SystemExit("No rows selected for generation.")
 
     chunks_by_doc = {}
-    if not args.no_context_enrichment and args.chunk_sidecar:
-        chunks_by_doc = load_chunks_by_doc(args.chunk_sidecar)
-        if chunks_by_doc:
-            print(f"[INFO] loaded generation context sidecar: {args.chunk_sidecar}")
-        else:
-            print(f"[WARN] generation context sidecar not found or empty: {args.chunk_sidecar}")
+    rfp_resources = None
+    if args.context_mode == "current":
+        if not args.no_context_enrichment and args.chunk_sidecar:
+            chunks_by_doc = load_chunks_by_doc(args.chunk_sidecar)
+            if chunks_by_doc:
+                print(f"[INFO] loaded generation context sidecar: {args.chunk_sidecar}")
+            else:
+                print(f"[WARN] generation context sidecar not found or empty: {args.chunk_sidecar}")
+    else:
+        rfp_resources = load_rfp_generation_resources(
+            rows,
+            chunks_path=args.chunk_sidecar,
+            source_store_path=args.source_store_path,
+            use_source_store=args.use_source_store,
+        )
+        print(
+            "[INFO] loaded advanced RFP generation resources: "
+            f"chunks={len(rfp_resources.chunk_index)} "
+            f"source_store={len(rfp_resources.source_store_index)} "
+            f"mode={args.context_mode}"
+        )
 
     generator = None
     if not args.dry_run:
@@ -113,6 +178,10 @@ def main() -> None:
             top_p=args.top_p,
             device=args.device,
             torch_dtype=args.torch_dtype,
+            load_in_4bit=args.load_in_4bit,
+            bnb_4bit_compute_dtype=args.bnb_4bit_compute_dtype,
+            enable_thinking=args.enable_thinking,
+            adapter_path=args.adapter_path,
         )
 
     review_sections = [render_review_header(args, rows)]
@@ -126,29 +195,52 @@ def main() -> None:
                 max_contexts=args.max_retrieved_contexts,
                 max_docs=args.max_context_docs,
             )
-            retrieved_contexts = enrich_retrieved_contexts(
-                question=row["question"],
-                retrieved_contexts=retrieved_contexts,
-                chunks_by_doc=chunks_by_doc,
-                max_extra_contexts=args.max_extra_contexts,
-                max_extra_per_doc=args.max_extra_per_doc,
-            )
-            generation_input = build_generation_input(
-                question=row["question"],
-                retrieved_contexts=retrieved_contexts,
-                context_max_chars=args.context_max_chars,
-                snippets_per_context=args.snippets_per_context,
-            )
+            if args.context_mode == "current":
+                retrieved_contexts = enrich_retrieved_contexts(
+                    question=row["question"],
+                    retrieved_contexts=retrieved_contexts,
+                    chunks_by_doc=chunks_by_doc,
+                    max_extra_contexts=args.max_extra_contexts,
+                    max_extra_per_doc=args.max_extra_per_doc,
+                )
+                generation_input = build_generation_input(
+                    question=row["question"],
+                    retrieved_contexts=retrieved_contexts,
+                    context_max_chars=args.context_max_chars,
+                    snippets_per_context=args.snippets_per_context,
+                )
+            else:
+                if rfp_resources is None:
+                    raise RuntimeError("Advanced RFP resources were not loaded.")
+                generation_input = build_rfp_generation_input(
+                    question=row["question"],
+                    retrieved_contexts=retrieved_contexts,
+                    resources=rfp_resources,
+                    context_mode=args.context_mode,
+                    use_source_store=args.use_source_store,
+                    task_metadata=row.get("domain_task_metadata"),
+                )
 
             if args.dry_run:
                 answer = ""
                 latency_ms = 0
                 guardrails = {"confidence": "not_run", "warnings": ["dry_run"]}
-            else:
+            elif args.context_mode == "current":
                 answer = generator.generate_prompt(generation_input.prompt)
                 answer = dedupe_repeated_lines(answer)
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 guardrails = validate_generation_answer(answer, generation_input)
+            else:
+                raw_answer = generator.generate_prompt(
+                    generation_input.prompt,
+                    system_prompt=generation_input.system_prompt,
+                )
+                processed_answer = postprocess_rfp_generation_answer(raw_answer, generation_input)
+                answer = dedupe_repeated_lines(str(processed_answer.get("answer") or ""))
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                guardrails = advanced_guardrails(processed_answer)
+                generation_input.extra_payload["raw_answer"] = raw_answer
+                generation_input.extra_payload["advanced_answer"] = processed_answer
 
             payload = build_payload(row, generation_input, answer, guardrails, latency_ms, args)
             out_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -166,6 +258,24 @@ def main() -> None:
     print(f"[DONE] csv: {csv_path}")
     if args.dry_run:
         print("[DRY RUN] prompts were generated without loading a Hugging Face model.")
+
+
+def load_single_eval_csv(eval_file: Path) -> pd.DataFrame:
+    frame = pd.read_csv(eval_file, encoding="utf-8-sig")
+    frame["source_eval_file"] = eval_file.name
+    missing_columns = [column for column in EVAL_REQUIRED_COLUMNS if column not in frame.columns]
+    if missing_columns:
+        raise ValueError(f"Eval CSV is missing required columns: {missing_columns}")
+
+    frame["ground_truth_doc_list"] = frame["ground_truth_docs"].apply(parse_doc_list)
+    frame["metadata_filter_obj"] = frame["metadata_filter"].apply(lambda value: parse_structured_cell(value, {}))
+    frame["history_obj"] = frame["history"].apply(lambda value: parse_structured_cell(value, []))
+    frame["has_history"] = frame["history_obj"].apply(bool)
+    frame["is_multi_doc"] = frame["ground_truth_doc_list"].apply(lambda docs: len(docs) > 1)
+    frame["is_unanswerable"] = frame["type"].astype(str).str.upper().eq("D")
+    frame["normalized_type"] = frame["type"].astype(str).str.strip().str.upper()
+    frame["normalized_difficulty"] = frame["difficulty"].astype(str).str.strip()
+    return frame
 
 
 def load_generation_predictions(predictions_path: Path) -> pd.DataFrame:
@@ -196,7 +306,11 @@ def load_generation_predictions(predictions_path: Path) -> pd.DataFrame:
 
 
 def select_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
-    eval_df = load_eval_csvs(Path(args.eval_dir), canonical_only=args.canonical_only)
+    if args.eval_file:
+        eval_df = load_single_eval_csv(Path(args.eval_file))
+    else:
+        eval_df = load_eval_csvs(Path(args.eval_dir), canonical_only=args.canonical_only)
+    domain_gold = load_domain_gold_metadata(Path(args.domain_gold_path)) if args.domain_gold_path else {}
     pred_df = load_generation_predictions(Path(args.predictions))
     merged = merge_eval_predictions(eval_df, pred_df)
     merged = merged[~merged["prediction_missing"]].copy()
@@ -226,9 +340,39 @@ def select_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "ground_truth_docs": row.get("ground_truth_doc_list"),
                 "metadata_filter": row.get("metadata_filter_obj"),
                 "retrieved_contexts": retrieved_contexts if isinstance(retrieved_contexts, list) else [],
+                "domain_task_metadata": domain_gold.get(str(row.get("id")), {}),
             }
         )
     return rows
+
+
+def load_domain_gold_metadata(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(f"domain gold path not found: {path}")
+    metadata: dict[str, dict[str, Any]] = {}
+    with path.open("r", encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid domain gold JSONL at line {line_number}: {exc}") from exc
+            qid = str(row.get("id") or row.get("question_id") or "")
+            if not qid:
+                continue
+            metadata[qid] = {
+                "id": qid,
+                "task_family": row.get("task_family"),
+                "secondary_task_families": row.get("secondary_task_families") or [],
+                "question_type": row.get("question_type"),
+                "difficulty": row.get("difficulty"),
+                "source_docs": row.get("source_docs") or [],
+                "identity_gold": row.get("identity_gold") or {},
+                "gold_generation_status": row.get("gold_generation_status"),
+            }
+    return metadata
 
 
 def select_generation_contexts(
@@ -291,7 +435,7 @@ def build_payload(
     latency_ms: int,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "id": row.get("id"),
         "type": row.get("type"),
         "difficulty": row.get("difficulty"),
@@ -309,6 +453,7 @@ def build_payload(
         "guardrails": guardrails,
         "latency_ms": latency_ms,
         "generation_model": args.model,
+        "domain_task_metadata": row.get("domain_task_metadata") or {},
         "generation_config": {
             "temperature": args.temperature,
             "top_p": args.top_p,
@@ -322,9 +467,22 @@ def build_payload(
             "max_extra_contexts": args.max_extra_contexts,
             "max_extra_per_doc": args.max_extra_per_doc,
             "dry_run": args.dry_run,
+            "load_in_4bit": args.load_in_4bit,
+            "bnb_4bit_compute_dtype": args.bnb_4bit_compute_dtype,
+            "enable_thinking": args.enable_thinking,
+            "context_mode": args.context_mode,
+            "source_store_path": args.source_store_path,
+            "use_source_store": args.use_source_store,
         },
         "prompt": generation_input.prompt,
     }
+    extra_payload = getattr(generation_input, "extra_payload", None)
+    if isinstance(extra_payload, dict):
+        payload.update(extra_payload)
+    system_prompt = getattr(generation_input, "system_prompt", None)
+    if system_prompt:
+        payload["system_prompt"] = system_prompt
+    return payload
 
 
 def render_review_header(args: argparse.Namespace, rows: list[dict[str, Any]]) -> str:
@@ -337,7 +495,11 @@ def render_review_header(args: argparse.Namespace, rows: list[dict[str, Any]]) -
             f"- predictions: {args.predictions}",
             f"- selected_questions: {len(rows)}",
             f"- dry_run: {args.dry_run}",
-            f"- context_enrichment: {not args.no_context_enrichment}",
+            f"- load_in_4bit: {args.load_in_4bit}",
+            f"- enable_thinking: {args.enable_thinking}",
+            f"- context_mode: {args.context_mode}",
+            f"- use_source_store: {args.use_source_store}",
+            f"- context_enrichment: {not args.no_context_enrichment if args.context_mode == 'current' else 'advanced_rfp'}",
             "- question_source: prediction question is used when available",
             f"- chunk_sidecar: {args.chunk_sidecar}",
             f"- max_retrieved_contexts: {args.max_retrieved_contexts}",
@@ -410,6 +572,10 @@ def build_manual_review_row(payload: dict[str, Any]) -> dict[str, Any]:
         "guardrail_warnings": _json_cell(guardrails.get("warnings") or []),
         "latency_ms": payload.get("latency_ms"),
         "generation_model": payload.get("generation_model"),
+        "context_mode": payload.get("context_mode") or (payload.get("generation_config") or {}).get("context_mode"),
+        "context_char_count": payload.get("context_char_count") or len(str(payload.get("prompt") or "")),
+        "use_source_store": payload.get("use_source_store"),
+        "failure_tags": _json_cell(guardrails.get("failure_tags") or []),
         "human_correctness": "",
         "evidence_grounded": "",
         "failure_type": "",
@@ -434,6 +600,10 @@ def write_manual_review_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "guardrail_warnings",
         "latency_ms",
         "generation_model",
+        "context_mode",
+        "context_char_count",
+        "use_source_store",
+        "failure_tags",
         "human_correctness",
         "evidence_grounded",
         "failure_type",
