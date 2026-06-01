@@ -29,6 +29,11 @@
 | 평가지표 | 이다현 |
 | 보고서, PPT | 조용준 |
 
+## 보고서 및 협업일지
+
+- [프로젝트 보고서 PDF 다운로드](./assets/TEAM3_RFP_Report.pdf)
+- [TEAM 3 협업일지 바로가기](협업일지_링크를_여기에_입력)
+
 ## Demo
 
 ![RFP RAG Search demo](./assets/RFP_RAG_Search.gif)
