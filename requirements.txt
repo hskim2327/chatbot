@@ -1,0 +1,15 @@
+fastapi==0.111.0
+uvicorn==0.30.0
+streamlit==1.36.0
+requests>=2.31.0
+python-dotenv>=1.0.1
+pydantic>=2.7.0
+chromadb==0.5.23
+numpy==1.26.4
+rank-bm25>=0.2.2
+sentence-transformers>=3.0.1
+transformers>=4.44.0,<4.46.0
+tokenizers>=0.20.0,<=0.20.3
+torch>=2.2.0
+accelerate>=0.30.0
+openai>=1.35.0
