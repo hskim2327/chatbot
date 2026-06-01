@@ -1,20 +1,18 @@
 # TEAM 3_RFP 문서 검색 Chatbot
 
-나라장터 RFP 문서를 발주기관 기준으로 검색하고, 선택한 문서 근거를 바탕으로 답변하는 RAG chatbot입니다.
-
 ## 프로젝트 소개
 
 본 프로젝트는 TEAM 3의 AI 중급 프로젝트 결과물로, 나라장터 공고 RFP 문서를 대상으로 RAG(Retrieval-Augmented Generation) 기반 질의응답 챗봇입니다. 사용자는 발주기관을 선택한 뒤 질문을 입력할 수 있으며, 시스템은 ChromaDB에 저장된 문서 청크(chunk)를 벡터 검색으로 조회하고, LLM을 통해 관련 답변을 생성합니다.
 
 ## 기술 스택 및 개발 환경
 
-**Data & Embedding:** `chunks_v2_125.jsonl` 데이터를 활용하며, HuggingFace의 KuRe_v1 모델로 임베딩된 파일을 import하여 사용합니다.
+- **Data & Embedding:** `chunks_v2_125.jsonl` 데이터를 활용하며, HuggingFace의 KuRe_v1 모델로 임베딩된 파일을 import하여 사용합니다.
 
-**Retrieval:** LangGraph를 기반으로 검색 파이프라인을 구축하였습니다.
+- **Retrieval:** LangGraph를 기반으로 검색 파이프라인을 구축하였습니다.
 
-**LLM:** OpenAI와 HuggingFace(`sh2orc/Llama-3.1-Korean-8B-Instruct`) 두 가지 옵션을 제공하여 유연한 답변 생성을 지원합니다.
+- **LLM:** OpenAI와 HuggingFace(`sh2orc/Llama-3.1-Korean-8B-Instruct`) 두 가지 옵션을 제공하여 유연한 답변 생성을 지원합니다.
 
-**Evaluation:** 프로젝트의 성능 최적화를 위해 자체 개발한 평가 항목을 적용하였습니다.
+- **Evaluation:** 프로젝트의 성능 최적화를 위해 자체 개발한 평가 항목을 적용하였습니다.
 
 ## 개발 워크플로우
 
@@ -31,6 +29,10 @@
 | 평가지표 | 이다현 |
 | 보고서, PPT | 조용준 |
 
+## Demo
+
+![RFP RAG Search demo](./assets/RFP_RAG_Search.gif)
+
 ## 폴더 구성
 
 ```text
@@ -39,6 +41,7 @@ main/
   app/
   frontend/
   .streamlit/
+  assets/
   ingest/
   .env
   requirements.txt
