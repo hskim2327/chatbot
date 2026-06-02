@@ -12,11 +12,9 @@ def project_root() -> Path:
 
     current = Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "data" / "eval").exists() and (parent / "eval" / "evaluation").exists():
+        if (parent / "data" / "eval").exists() and (parent / "new_data").exists() and (parent / "AGENTS.md").exists():
             return parent
-        if (parent / "data" / "eval").exists() and (parent / "new_data").exists():
-            return parent
-    return current.parents[4]
+    return current.parents[3]
 
 
 def resolve_path(path_value: str | Path, base_dir: Path | None = None) -> Path:

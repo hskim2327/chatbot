@@ -61,6 +61,7 @@ def sample_predictions():
                 "id": "Q001",
                 "question": "예산은 얼마인가?",
                 "answer": "예산은 1억원입니다.",
+                "latency_ms": 2500,
                 "retrieved_contexts": [
                     {"rank": 1, "filename": "A.hwp", "chunk_id": "c1", "text": "예산 근거 요약"}
                 ],
@@ -69,6 +70,7 @@ def sample_predictions():
                 "id": "Q002",
                 "question": "최종 낙찰업체는?",
                 "answer": "제공된 자료에는 최종 낙찰업체가 명시되어 있지 않습니다.",
+                "latency_sec": 1.2,
                 "retrieved_contexts": [],
             },
         ]
@@ -99,6 +101,14 @@ def test_mock_mode_writes_nested_results_and_log(tmp_path):
     assert result.summary["judged_count"] == 2
     assert result.summary["reference_mode"] == "evidence_only"
     assert "calculated_overall_score" in result.results.columns
+    assert "answer_latency_sec" in result.results.columns
+    assert "문항별 한글 총평" in result.results.columns
+    assert "case_evaluation_ko" in result.results.columns
+    assert "strengths_ko" in result.results.columns
+    assert "weaknesses_ko" in result.results.columns
+    assert "improvement_hint_ko" in result.results.columns
+    assert result.results["case_evaluation_ko"].astype(str).str.len().gt(0).all()
+    assert result.summary["average_answer_latency_sec"] > 0
     assert (tmp_path / "out" / "phase4_llm_judge_inputs.jsonl").exists()
     assert (tmp_path / "out" / "phase4_llm_judge_results.csv").exists()
     assert (tmp_path / "out" / "experiment_logs" / "phase4_llm_judge_experiments.csv").exists()

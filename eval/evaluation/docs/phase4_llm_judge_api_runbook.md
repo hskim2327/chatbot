@@ -298,3 +298,26 @@ Select-String -Path "eval/evaluation/outputs/eval/*" -Pattern "sk-" -SimpleMatch
 - 실제 API 실행 전에는 반드시 `dry_run` 산출물을 먼저 확인한다.
 - API key 값은 어떤 파일에도 저장하지 않는다.
 - 실제 API 검증 결과는 비용, 모델명, prompt/schema version, sample-size와 함께 해석한다.
+
+## 11. 한글 리포트와 레이턴시 확인
+
+API mode 또는 mock mode 실행 후 사람이 보는 결과 파일에는 한글 표시 컬럼이 함께 생성된다.
+
+- `phase4_llm_judge_summary.md`: 종합 점수, 100점 환산, 전체 판정, 항목별 평균 점수, 레이턴시 참고 지표를 한글로 확인한다.
+- `phase4_llm_judge_results.csv`: 기존 영어 내부 컬럼과 함께 `종합 점수`, `종합 판정`, `답변 생성 시간초`, `문항별 한글 총평`, `점수 근거 한글 요약`을 확인한다.
+- `phase4_llm_judge_failure_cases.csv`: 실패 또는 사람 검토 필요 문항의 `실패 사유 한글 요약`, `주요 감점 항목`, `개선 힌트`를 먼저 본다.
+
+`answer_latency_sec`는 predictions JSONL의 `latency_ms` 또는 `latency_sec`에서 만든 RAG 답변 생성 시간 참고값이다. 이 값은 점수 계산에는 반영하지 않는다. Judge API 호출 시간과 혼동하지 않도록 실행 보고서에서는 레이턴시를 참고 지표로만 해석한다.
+
+## 12. 문항별 한글 총평 확인
+
+API mode 검증 후에는 점수뿐 아니라 한글 설명 필드도 함께 확인한다.
+
+- `case_evaluation_ko`: 문항별 전체 평가
+- `strengths_ko`: 잘한 점
+- `weaknesses_ko`: 부족한 점
+- `score_rationale_ko`: 점수 산정 이유
+- `improvement_hint_ko`: 개선 방향
+- `risk_comment_ko`: 실무 위험 설명
+
+`phase4_llm_judge_summary.md`의 `전체 평가 총평` 섹션은 실험 전체의 종합 점수, 전체 판정, 가장 강한 항목, 가장 약한 항목, 주요 실패 유형, 실무 사용 가능성, 다음 개선 우선순위를 요약한다. 이 설명은 팀원이 실험 결과를 빠르게 공유하고 개선 방향을 정하는 데 사용한다.

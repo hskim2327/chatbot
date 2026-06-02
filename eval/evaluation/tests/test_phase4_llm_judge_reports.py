@@ -37,6 +37,20 @@ def test_reports_write_expected_files_and_do_not_expose_api_key(tmp_path):
                 "unsupported_or_risky_claims": [],
                 "needs_human_review": False,
                 "judge_comment": "요약",
+                "answer_latency_sec": 2.5,
+                "latency_note": "predictions latency_ms 기준",
+                "case_evaluation_ko": "근거가 충분하고 위험한 단정이 적습니다.",
+                "strengths_ko": ["근거 기반 답변"],
+                "weaknesses_ko": [],
+                "score_rationale_ko": "근거성과 완전성이 양호합니다.",
+                "improvement_hint_ko": "핵심 수치를 한 번 더 확인하면 좋습니다.",
+                "risk_comment_ko": "큰 실무 위험은 낮습니다.",
+                "문항별 한글 총평": "근거가 충분하고 위험한 단정이 적습니다.",
+                "종합 점수": 4.1,
+                "종합 판정": "실무 사용 적합",
+                "답변 생성 시간초": 2.5,
+                "실패 사유 한글 요약": "",
+                "점수 근거 한글 요약": "근거성과 완전성이 양호합니다.",
                 "score_cap_applied": False,
                 "score_cap_reason": "",
                 "score_disagreement_warning": False,
@@ -58,6 +72,9 @@ def test_reports_write_expected_files_and_do_not_expose_api_key(tmp_path):
         "api_key_present": True,
         "average_judge_overall_score": 4.0,
         "average_calculated_overall_score": 4.1,
+        "average_answer_latency_sec": 2.5,
+        "median_answer_latency_sec": 2.5,
+        "max_answer_latency_sec": 2.5,
         "risk_level_distribution": {"low": 1},
         "hallucination_risk_distribution": {"low": 1},
         "needs_human_review_count": 0,
@@ -73,9 +90,27 @@ def test_reports_write_expected_files_and_do_not_expose_api_key(tmp_path):
     assert (output_dir / "phase4_llm_judge_results.json").exists()
     assert (output_dir / "phase4_llm_judge_summary.md").exists()
     assert (output_dir / "phase4_llm_judge_failure_cases.csv").exists()
-    assert "실제 품질 점수로 해석하지 마십시오" in (output_dir / "phase4_llm_judge_summary.md").read_text(
-        encoding="utf-8"
-    )
+    summary_text = (output_dir / "phase4_llm_judge_summary.md").read_text(encoding="utf-8")
+    results_csv = pd.read_csv(output_dir / "phase4_llm_judge_results.csv")
+
+    assert "Phase 4 LLM Judge 평가 요약" in summary_text
+    assert "종합 점수" in summary_text
+    assert "전체 판정" in summary_text
+    assert "레이턴시 참고 지표" in summary_text
+    assert "전체 평가 총평" in summary_text
+    assert "주요 강점" in summary_text
+    assert "개선 우선순위" in summary_text
+    assert "answer_latency_sec" in results_csv.columns
+    assert "답변 생성 시간초" in results_csv.columns
+    assert "문항별 한글 총평" in results_csv.columns
+    assert "case_evaluation_ko" in results_csv.columns
+    assert "strengths_ko" in results_csv.columns
+    assert "weaknesses_ko" in results_csv.columns
+    assert "score_rationale_ko" in results_csv.columns
+    assert "improvement_hint_ko" in results_csv.columns
+    assert "risk_comment_ko" in results_csv.columns
+    assert "calculated_overall_score" in results_csv.columns
+    assert "실제 품질 점수로 해석하지 마십시오" in summary_text
 
     combined = "\n".join(path.read_text(encoding="utf-8-sig", errors="ignore") for path in output_dir.glob("phase4_*"))
     assert "test-secret-value" not in combined

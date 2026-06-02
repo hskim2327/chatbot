@@ -3,7 +3,6 @@
 OFFICIAL_TOP_K = 5
 
 PHASE1_METRIC_COLUMNS = ("hit_at_5", "mrr_at_5", "ndcg_at_5")
-PHASE1_ANALYSIS_COLUMNS = ("doc_recall_at_5", "multi_doc_recall_at_5")
 
 RAGAS_INPUT_SCHEMA = "question,answer,contexts,ground_truth"
 RAGAS_COLUMN_MAP = ""

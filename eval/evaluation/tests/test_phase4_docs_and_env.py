@@ -34,3 +34,4 @@ def test_requirements_include_python_dotenv():
     text = (EVALUATION_ROOT / "requirements.txt").read_text(encoding="utf-8")
 
     assert "python-dotenv" in text
+

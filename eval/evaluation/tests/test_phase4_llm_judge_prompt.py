@@ -24,6 +24,16 @@ def test_system_prompt_contains_required_policy_and_no_zero_placeholder():
     assert "JSON" in prompt
     assert "0점" in prompt
     assert '"score": 0' not in prompt
+    assert "judge_comment는 한국어" in prompt
+    assert "rationale은 한국어" in prompt
+    assert "main_strengths" in prompt
+    assert "unsupported_or_risky_claims" in prompt
+    assert "case_evaluation_ko" in prompt
+    assert "strengths_ko" in prompt
+    assert "weaknesses_ko" in prompt
+    assert "score_rationale_ko" in prompt
+    assert "improvement_hint_ko" in prompt
+    assert "risk_comment_ko" in prompt
 
 
 def test_evidence_only_payload_has_no_gold_warning_or_phase_scores():

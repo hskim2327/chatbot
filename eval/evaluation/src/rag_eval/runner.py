@@ -36,7 +36,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--require-ragas", action="store_true", help="RAGAS 실패 시 non-zero exit code 반환")
     parser.add_argument("--ragas-sample-size", type=int, default=0, help="RAGAS 평가 샘플 수. 0이면 전체")
     parser.add_argument("--ragas-output-path", default="", help="RAGAS CSV를 별도 저장할 경로")
-    parser.add_argument("--include-analysis-metrics", action="store_true", help="doc_recall_at_5 등 분석용 검색 지표를 추가 저장")
     parser.add_argument("--enable-domain", action="store_true", help="Phase 3 RFP 도메인 평가 실행")
     parser.add_argument("--require-domain", action="store_true", help="Phase 3 실패 시 가능한 결과 저장 후 non-zero 반환")
     parser.add_argument("--domain-gold-path", default=DEFAULT_DOMAIN_GOLD_PATH, help="Phase 3 도메인 gold JSONL 경로")
@@ -150,11 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     predictions_df = load_predictions_jsonl(predictions_path)
     merged_df = merge_eval_predictions(eval_df, predictions_df)
 
-    phase1_df = evaluate_phase1(
-        merged_df,
-        top_k=OFFICIAL_TOP_K,
-        include_analysis_metrics=args.include_analysis_metrics,
-    )
+    phase1_df = evaluate_phase1(merged_df, top_k=OFFICIAL_TOP_K)
     phase1_summary, by_type, by_difficulty = aggregate_phase1(phase1_df)
 
     ragas_df = None

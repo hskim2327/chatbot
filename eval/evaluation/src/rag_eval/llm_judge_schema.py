@@ -37,6 +37,12 @@ REQUIRED_OUTPUT_FIELDS = {
     "unsupported_or_risky_claims",
     "needs_human_review",
     "judge_comment",
+    "case_evaluation_ko",
+    "strengths_ko",
+    "weaknesses_ko",
+    "score_rationale_ko",
+    "improvement_hint_ko",
+    "risk_comment_ko",
 }
 
 
@@ -73,6 +79,12 @@ def judge_output_json_schema() -> dict[str, Any]:
             "unsupported_or_risky_claims": {"type": "array", "items": {"type": "string"}},
             "needs_human_review": {"type": "boolean"},
             "judge_comment": {"type": "string"},
+            "case_evaluation_ko": {"type": "string"},
+            "strengths_ko": {"type": "array", "items": {"type": "string"}},
+            "weaknesses_ko": {"type": "array", "items": {"type": "string"}},
+            "score_rationale_ko": {"type": "string"},
+            "improvement_hint_ko": {"type": "string"},
+            "risk_comment_ko": {"type": "string"},
         },
         "required": sorted(REQUIRED_OUTPUT_FIELDS),
     }
@@ -314,13 +326,14 @@ def validate_judge_output(output: dict[str, Any], evidence_count: int | None = N
         if output[field] not in RISK_LEVELS:
             raise ValueError(f"{field} must be one of {sorted(RISK_LEVELS)}")
 
-    for field in ("main_strengths", "main_weaknesses", "unsupported_or_risky_claims"):
+    for field in ("main_strengths", "main_weaknesses", "unsupported_or_risky_claims", "strengths_ko", "weaknesses_ko"):
         _validate_string_list(field, output[field])
 
     if not isinstance(output["needs_human_review"], bool):
         raise ValueError("needs_human_review must be a boolean")
-    if not isinstance(output["judge_comment"], str):
-        raise ValueError("judge_comment must be a string")
+    for field in ("judge_comment", "case_evaluation_ko", "score_rationale_ko", "improvement_hint_ko", "risk_comment_ko"):
+        if not isinstance(output[field], str):
+            raise ValueError(f"{field} must be a string")
 
     processed = dict(output)
     processed.update(compute_overall_score(processed, question=question))

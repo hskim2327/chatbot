@@ -69,6 +69,13 @@ def build_system_prompt() -> str:
         "각 subscore는 1~5 정수로 평가하십시오. 0점은 사용하지 않습니다. "
         "각 subscore에는 짧은 한국어 rationale을 작성하고, 근거가 되는 evidence가 있으면 "
         "retrieved_evidence_summaries의 0-based index를 evidence_refs에 기록하십시오.\n\n"
+        "judge_comment는 한국어로 작성하십시오. rationale은 한국어로 작성하십시오. "
+        "main_strengths, main_weaknesses, unsupported_or_risky_claims는 짧은 한국어 문장 또는 구로 작성하십시오. "
+        "case_evaluation_ko, strengths_ko, weaknesses_ko, score_rationale_ko, improvement_hint_ko, risk_comment_ko도 반드시 한국어로 작성하십시오. "
+        "case_evaluation_ko에는 문항별 전체 평가를, strengths_ko에는 잘한 점을, weaknesses_ko에는 부족한 점을, "
+        "score_rationale_ko에는 점수 산정 이유를, improvement_hint_ko에는 개선 방향을, risk_comment_ko에는 실무 위험을 적으십시오. "
+        "문서에 없는 정보 단정은 명확한 감점 사유로 적고, 예산/금액/자격/제출서류/마감일 오류는 실무 위험으로 설명하십시오. "
+        "장황한 사고 과정은 쓰지 말고, 검수자가 확인할 수 있는 채점 사유만 간결하게 작성하십시오.\n\n"
         "반드시 JSON 객체만 출력하십시오. JSON 밖의 설명 문장, Markdown, 코드블록은 출력하지 마십시오."
     )
 

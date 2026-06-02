@@ -163,3 +163,17 @@ Phase 3는 `rfp_domain_gold_sample.jsonl`의 gold block을 사용하는 determin
 Phase 4는 Phase 3 점수를 대체하지 않는다. Phase 4는 기본적으로 gold를 보지 않는 `evidence_only` LLM Judge 평가이며, `question`, `rag_answer`, `source_docs`, `retrieved_evidence_summaries`만 사용해 실무 유용성, 근거성, 숫자/사실 정확성, 구조 명확성, 위험 통제를 종합 진단한다.
 
 따라서 Phase 3 점수는 정답 요소 반영 여부를 보는 deterministic signal이고, Phase 4 점수는 같은 evidence 조건에서 답변이 실무적으로 얼마나 쓸 만한지 보는 보조 진단 signal이다. 두 점수는 서로 대체 관계가 아니라 함께 해석해야 한다.
+
+
+## 11. 사람용 한글 리포트 컬럼
+
+Phase 3 결과 파일은 내부 계산용 영어 컬럼을 유지한다. 예를 들어 `phase3_task_score`, `budget_numeric_accuracy`, `required_field_accuracy`, `multi_doc_structure_score` 같은 컬럼은 테스트와 후속 분석을 위해 그대로 둔다.
+
+대신 사람이 읽는 결과에는 한글 표시명과 한글 요약 컬럼을 추가한다.
+
+- `phase3_domain_summary.md`: `검색 성능 요약`, `답변 내용 품질 요약`, `예산/금액 평가 요약`, `레이턴시 참고값`, `전체 한글 해석`, `종합 판정`을 제공한다. Phase 3 단독 결과에 검색 metric이 없으면 Phase 1 결과와 함께 해석하라는 안내를 표시한다.
+- `phase3_domain_results.csv`: 영어 내부 컬럼과 함께 `평가 유형 한글`, `주요 평가 항목`, `문항별 한글 평가`, `주요 감점 항목`, `개선 힌트`를 제공한다.
+- `phase3_domain_failure_cases.csv`: `실패 사유 한글 요약`, `주요 감점 항목`, `개선 힌트`, `문항별 한글 평가`를 제공해 팀원이 실패 원인을 빠르게 볼 수 있게 한다.
+- 검색 성능과 답변 내용 품질은 분리해서 해석한다. 정답 문서를 잘 찾았더라도 답변이 예산 금액, 필수 필드, 제출/자격/마감 checklist를 빠뜨리면 Phase 3 점수는 낮을 수 있다.
+
+이 한글 컬럼은 표시와 해석을 돕기 위한 보조 정보이며, Phase 3 metric 계산 로직 자체를 바꾸지 않는다.

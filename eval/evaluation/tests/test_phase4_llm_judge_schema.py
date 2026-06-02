@@ -61,6 +61,12 @@ def valid_output() -> dict:
         "unsupported_or_risky_claims": [],
         "needs_human_review": False,
         "judge_comment": "짧은 평가",
+        "case_evaluation_ko": "근거 기준으로 대체로 적절하지만 세부 값 확인은 필요합니다.",
+        "strengths_ko": ["근거 기반 답변"],
+        "weaknesses_ko": [],
+        "score_rationale_ko": "근거성과 완전성이 양호해 높은 점수를 받았습니다.",
+        "improvement_hint_ko": "핵심 수치와 날짜를 한 번 더 대조하면 좋습니다.",
+        "risk_comment_ko": "현재 큰 실무 위험은 낮습니다.",
     }
 
 
@@ -120,6 +126,25 @@ def test_validate_judge_output_accepts_nested_schema_and_postprocesses_score():
     assert output["overall_label"] in {"실무 사용 적합", "실무 사용 매우 적합"}
     assert output["parse_error"] is False
     assert output["validation_error"] is False
+    assert output["case_evaluation_ko"]
+    assert output["strengths_ko"] == ["근거 기반 답변"]
+
+
+def test_judge_output_schema_requires_korean_explanation_fields():
+    from rag_eval.llm_judge_schema import judge_output_json_schema
+
+    schema = judge_output_json_schema()
+
+    for field in (
+        "case_evaluation_ko",
+        "strengths_ko",
+        "weaknesses_ko",
+        "score_rationale_ko",
+        "improvement_hint_ko",
+        "risk_comment_ko",
+    ):
+        assert field in schema["properties"]
+        assert field in schema["required"]
 
 
 def test_validate_judge_output_rejects_zero_score_placeholder():

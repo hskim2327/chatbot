@@ -132,6 +132,104 @@ def test_domain_runner_writes_outputs_and_log(tmp_path):
     assert (output_dir / "experiment_logs" / "phase3_domain_experiments.csv").exists()
 
 
+def test_domain_reports_include_korean_summary_and_failure_columns(tmp_path):
+    gold_path = tmp_path / "gold.jsonl"
+    write_jsonl(gold_path, sample_gold_rows())
+    predictions = pd.DataFrame(
+        [
+            {
+                "id": "D001",
+                "question": "예산은?",
+                "answer": "예산 정보가 명확하지 않습니다.",
+                "retrieved_contexts": [],
+                "latency_ms": 2100,
+            },
+            {
+                "id": "D003",
+                "question": "오타 질문",
+                "answer": "다른 문서를 설명합니다.",
+                "retrieved_contexts": [],
+                "latency_sec": 1.5,
+            },
+        ]
+    )
+    output_dir = tmp_path / "out"
+
+    run_domain_evaluation(
+        gold_path,
+        predictions,
+        output_dir,
+        {
+            "experiment_id": "exp1",
+            "experiment_name": "domain",
+            "run_datetime": "2026-05-27T00:00:00",
+            "notes": "test",
+        },
+    )
+
+    summary_text = (output_dir / "phase3_domain_summary.md").read_text(encoding="utf-8")
+    failure_df = pd.read_csv(output_dir / "phase3_domain_failure_cases.csv")
+    results_df = pd.read_csv(output_dir / "phase3_domain_results.csv")
+
+    assert "Phase 3 RFP 도메인 평가 요약" in summary_text
+    assert "검색 성능 요약" in summary_text
+    assert "답변 내용 품질 요약" in summary_text
+    assert "예산/금액 평가 요약" in summary_text
+    assert "레이턴시 참고값" in summary_text
+    assert "전체 한글 해석" in summary_text
+    assert "종합 판정" in summary_text
+    assert "검색 성능 판정" in summary_text
+    assert "답변 생성 품질 판정" in summary_text
+    assert "예산/금액 처리 판정" in summary_text
+    assert "전체 개선 우선순위" in summary_text
+    assert "예산/금액 정확성" in summary_text
+    assert "budget_numeric_accuracy" in results_df.columns
+    assert "phase3_task_score" in results_df.columns
+    assert "평가 유형 한글" in results_df.columns
+    assert "주요 평가 항목" in results_df.columns
+    assert "문항별 한글 평가" in results_df.columns
+    assert "주요 감점 항목" in results_df.columns
+    assert "개선 힌트" in results_df.columns
+    assert "실패 사유 한글 요약" in failure_df.columns
+    assert "주요 감점 항목" in failure_df.columns
+    assert "개선 힌트" in failure_df.columns
+    assert "문항별 한글 평가" in failure_df.columns
+
+
+def test_domain_reports_do_not_modify_gold_or_write_secret_like_text(tmp_path):
+    gold_path = tmp_path / "gold.jsonl"
+    write_jsonl(gold_path, sample_gold_rows())
+    gold_before = gold_path.read_bytes()
+    predictions = pd.DataFrame(
+        [
+            {"id": "D001", "question": "예산은?", "answer": "1억원", "retrieved_contexts": []},
+            {"id": "D003", "question": "오타 질문", "answer": "1억원", "retrieved_contexts": []},
+        ]
+    )
+    output_dir = tmp_path / "out"
+
+    run_domain_evaluation(
+        gold_path,
+        predictions,
+        output_dir,
+        {
+            "experiment_id": "exp1",
+            "experiment_name": "domain",
+            "run_datetime": "2026-05-27T00:00:00",
+            "notes": "test",
+        },
+    )
+
+    assert gold_path.read_bytes() == gold_before
+    combined_output = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in output_dir.rglob("*")
+        if path.is_file() and path.suffix in {".csv", ".json", ".md"}
+    )
+    assert "sk-" not in combined_output
+    assert "OPENAI_API_KEY=sk-" not in combined_output
+
+
 def test_runner_help_contains_domain_flags(capsys):
     with pytest.raises(SystemExit):
         main(["--help"])

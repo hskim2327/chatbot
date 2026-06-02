@@ -55,6 +55,20 @@ def _mean(series: pd.Series) -> float:
     return float(value) if not pd.isna(value) else math.nan
 
 
+def _latency_sec(prediction: dict[str, Any] | None) -> float:
+    """prediction의 latency 값을 초 단위 참고값으로 정규화한다."""
+
+    if prediction is None:
+        return _nan()
+    if prediction.get("latency_sec") not in (None, ""):
+        value = pd.to_numeric(pd.Series([prediction.get("latency_sec")]), errors="coerce").iloc[0]
+        return float(value) if not pd.isna(value) else _nan()
+    if prediction.get("latency_ms") not in (None, ""):
+        value = pd.to_numeric(pd.Series([prediction.get("latency_ms")]), errors="coerce").iloc[0]
+        return float(value) / 1000.0 if not pd.isna(value) else _nan()
+    return _nan()
+
+
 def _empty_metric_row() -> dict[str, Any]:
     """모든 Phase 3 metric 컬럼의 기본값을 만든다."""
 
@@ -183,6 +197,7 @@ def _base_result_row(gold: dict[str, Any], prediction: dict[str, Any] | None) ->
         "warning_resolution_status": gold.get("warning_resolution_status", ""),
         "warning_resolution_notes": gold.get("warning_resolution_notes", ""),
         "phase3_applicable": prediction is not None,
+        "answer_latency_sec": _latency_sec(prediction),
     }
 
 

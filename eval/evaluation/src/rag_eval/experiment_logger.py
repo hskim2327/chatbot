@@ -11,17 +11,6 @@ import pandas as pd
 from .config import FAILURE_EXPERIMENT_LOG, OFFICIAL_TOP_K, PHASE1_EXPERIMENT_LOG, PHASE2_EXPERIMENT_LOG
 from .path_utils import ensure_parent
 
-def _fieldnames_for_append(path, fallback: list[str]) -> list[str]:
-    if not path.exists():
-        return fallback
-    with path.open("r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.reader(file)
-        try:
-            header = next(reader)
-        except StopIteration:
-            return fallback
-    return header or fallback
-
 
 def append_experiment_log(path, row: dict[str, Any]) -> None:
     """기존 CSV를 덮어쓰지 않고 실험 로그 한 행을 추가한다."""
@@ -32,9 +21,8 @@ def append_experiment_log(path, row: dict[str, Any]) -> None:
         for key, value in row.items()
     }
     file_exists = path.exists()
-    fieldnames = _fieldnames_for_append(path, list(serializable.keys()))
     with path.open("a", encoding="utf-8-sig", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
+        writer = csv.DictWriter(file, fieldnames=list(serializable.keys()))
         if not file_exists:
             writer.writeheader()
         writer.writerow(serializable)

@@ -1,4 +1,4 @@
-id,task_family,source_set,gold_block_type,gold_generation_status,gold_generation_warnings,can_use_for_phase3,has_question,has_source_docs,has_evidence_refs,warning_count,warning_resolution_status,warning_resolution_notes
+﻿id,task_family,source_set,gold_block_type,gold_generation_status,gold_generation_warnings,can_use_for_phase3,has_question,has_source_docs,has_evidence_refs,warning_count,warning_resolution_status,warning_resolution_notes
 Q003,budget,canonical_selected_50,budget_gold,complete,,True,True,True,True,0,,
 Q009,budget,canonical_selected_50,budget_gold,complete,,True,True,True,True,0,,
 Q010,budget,canonical_selected_50,budget_gold,complete,,True,True,True,True,0,,

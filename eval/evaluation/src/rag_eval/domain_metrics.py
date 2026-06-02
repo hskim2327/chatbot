@@ -358,3 +358,4 @@ def compute_robust_query_consistency_score(
         "related_original_id": robust_gold.get("related_original_id") or robust_gold.get("canonical_question_id"),
         "robust_warning": "; ".join(warning_parts),
     }
+

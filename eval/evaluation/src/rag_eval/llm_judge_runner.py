@@ -44,6 +44,39 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def _prediction_latency_sec(row: dict[str, Any]) -> float | None:
+    """prediction row의 latency_ms/latency_sec를 초 단위 참고값으로 변환한다."""
+
+    if row.get("latency_sec") not in (None, ""):
+        value = pd.to_numeric(pd.Series([row.get("latency_sec")]), errors="coerce").iloc[0]
+        return float(value) if not pd.isna(value) else None
+    if row.get("latency_ms") not in (None, ""):
+        value = pd.to_numeric(pd.Series([row.get("latency_ms")]), errors="coerce").iloc[0]
+        return float(value) / 1000.0 if not pd.isna(value) else None
+    return None
+
+
+def _prediction_latency_map(predictions_df: pd.DataFrame) -> dict[str, float]:
+    """prediction id별 RAG 답변 생성 latency 참고값을 만든다."""
+
+    latency_by_id: dict[str, float] = {}
+    for row in predictions_df.to_dict(orient="records"):
+        latency = _prediction_latency_sec(row)
+        if latency is not None:
+            latency_by_id[str(row.get("id"))] = latency
+    return latency_by_id
+
+
+def _attach_prediction_metadata(raw_results: list[dict[str, Any]], latency_by_id: dict[str, float]) -> None:
+    """Judge raw result에 점수 미반영 prediction metadata를 붙인다."""
+
+    for row in raw_results:
+        latency = latency_by_id.get(str(row.get("id")))
+        if latency is not None:
+            row["answer_latency_sec"] = latency
+            row["latency_note"] = "predictions latency_ms/latency_sec 기준 참고값이며 점수에는 반영하지 않음"
+
+
 def _summarize_gold(gold: dict[str, Any]) -> str:
     """gold block을 500자 이내의 짧은 요약으로 변환한다."""
 
@@ -196,6 +229,36 @@ def _mock_judge_output(judge_input: JudgeInput) -> dict[str, Any]:
         "unsupported_or_risky_claims": unsupported,
         "needs_human_review": risk_level == "high",
         "judge_comment": "mock judge 결과이며 실제 품질 점수로 해석하지 않습니다.",
+        "case_evaluation_ko": (
+            "답변이 비어 있어 질문에 대한 평가가 어렵습니다."
+            if not answer
+            else (
+                "검색 근거가 부족해 답변의 근거성을 확인하기 어렵습니다."
+                if evidence_count == 0
+                else "검색 근거와 답변이 일부 일치해 제한적으로 참고 가능한 mock 평가 결과입니다."
+            )
+        ),
+        "strengths_ko": ["검색 근거와 답변 형식이 일부 확인됩니다."] if answer and evidence_count else [],
+        "weaknesses_ko": (
+            ["답변 없음"]
+            if not answer
+            else (["검색 근거 부족"] if evidence_count == 0 else ([] if numeric_score > 2 else ["숫자/금액 정보 확인 필요"]))
+        ),
+        "score_rationale_ko": "mock 규칙으로 답변 존재 여부, 근거 수, 위험 단정 표현, 숫자 포함 여부를 반영했습니다.",
+        "improvement_hint_ko": (
+            "최소한 근거 기반의 직접 답변을 생성해야 합니다."
+            if not answer
+            else (
+                "검색 근거를 확보한 뒤 답변 문장과 연결해야 합니다."
+                if evidence_count == 0
+                else "금액 단위와 핵심 사실을 근거 문서와 다시 대조하세요."
+            )
+        ),
+        "risk_comment_ko": (
+            "근거 없는 단정 위험이 있습니다."
+            if risk_level == "high" or evidence_count == 0
+            else "현재 mock 기준의 실무 위험은 낮거나 제한적입니다."
+        ),
     }
     return validate_judge_output(output, evidence_count=evidence_count, question=question)
 
@@ -237,6 +300,7 @@ def run_llm_judge_evaluation(
     usable_gold, _ = load_domain_gold(domain_gold_path)
     judge_inputs = build_judge_inputs(usable_gold, predictions_df, sample_size=sample_size)
     input_dicts = [build_judge_case_payload(item, reference_mode=reference_mode) for item in judge_inputs]
+    latency_by_id = _prediction_latency_map(predictions_df)
 
     raw_results: list[dict[str, Any]] = []
     if mode == "dry_run":
@@ -244,9 +308,11 @@ def run_llm_judge_evaluation(
     elif mode == "api":
         adapter = OpenAIJudgeAdapter(settings=settings, client=api_client)
         raw_results = [adapter.evaluate(item, reference_mode=reference_mode) for item in judge_inputs]
+        _attach_prediction_metadata(raw_results, latency_by_id)
         results_df = results_dataframe(raw_results)
     else:
         raw_results = [_mock_judge_output(item) for item in judge_inputs]
+        _attach_prediction_metadata(raw_results, latency_by_id)
         results_df = results_dataframe(raw_results)
 
     summary = summarize_results(

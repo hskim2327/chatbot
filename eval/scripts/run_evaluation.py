@@ -1,18 +1,13 @@
-"""Convenience entrypoint for the nested evaluation module."""
+"""Convenience wrapper for the evaluation CLI."""
 
 from __future__ import annotations
 
-import sys
+import runpy
 from pathlib import Path
 
 
-EVALUATION_ROOT = Path(__file__).resolve().parents[1] / "evaluation"
-SRC_DIR = EVALUATION_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from rag_eval.runner import main
+TARGET = Path(__file__).resolve().parents[1] / "evaluation" / "scripts" / "run_evaluation.py"
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    runpy.run_path(str(TARGET), run_name="__main__")

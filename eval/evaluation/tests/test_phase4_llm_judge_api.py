@@ -37,6 +37,12 @@ def valid_output(case_id: str = "Q001") -> dict:
         "unsupported_or_risky_claims": [],
         "needs_human_review": False,
         "judge_comment": "짧은 평가입니다.",
+        "case_evaluation_ko": "근거 기준으로 대체로 적절한 답변입니다.",
+        "strengths_ko": ["근거 기반 답변"],
+        "weaknesses_ko": [],
+        "score_rationale_ko": "대부분의 세부 점수가 양호합니다.",
+        "improvement_hint_ko": "수치와 날짜를 한 번 더 확인하면 좋습니다.",
+        "risk_comment_ko": "큰 실무 위험은 낮습니다.",
     }
 
 
